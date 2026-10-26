@@ -1,0 +1,70 @@
+# ITCHy
+
+ITCHy is an offline parser and order book engine for a gzip-compressed, length-prefixed ITCH-style feed. It reads records from a file, applies supported book updates, and can emit top-of-book CSV rows or run the built-in benchmark mode.
+
+It is not a live market data gateway. It does not use DPDK, packet replay, sockets, or Kafka. The parser path applies feed updates offline; the matching engine is an opt-in API for synthetic crossing orders.
+
+## Build
+
+Dependencies on Debian/Ubuntu:
+
+```sh
+sudo apt-get install make gcc libc6-dev zlib1g-dev uthash-dev
+```
+
+Build and test:
+
+```sh
+make build
+make test
+make test-sanitize
+```
+
+Run the small benchmark smoke target:
+
+```sh
+make bench
+```
+
+Benchmark mode uses a fixed-seed synthetic apply workload. The positional input argument is kept for CLI compatibility and is not read in benchmark mode:
+
+```sh
+./itchy synthetic --benchmark
+```
+
+## Usage
+
+```sh
+./itchy input.gz [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--benchmark]
+```
+
+Normal mode writes CSV with:
+
+```text
+timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
+```
+
+Benchmark mode generates deterministic synthetic workloads, runs warmup passes, then reports single-threaded apply performance, a two-thread SPSC producer/consumer comparison, and a matching-engine workload. Environment variables control the run: `ITCHY_BENCH_MESSAGES`, `ITCHY_BENCH_RUNS`, `ITCHY_BENCH_WARMUP_RUNS`, `ITCHY_BENCH_BATCH`, `ITCHY_BENCH_RING`, `ITCHY_MATCH_BENCH_MESSAGES`, and `ITCHY_BENCH_SEED`.
+
+## Input Format
+
+The parser expects gzip-compressed records framed as:
+
+```text
+2-byte big-endian length
+message bytes
+```
+
+Supported order-book messages include add, execute, cancel, delete, and replace-style records for the layouts used by this project. Known administrative/reference messages are counted but do not change the book.
+
+The sample feed this project was built around contains non-standard 34-byte `U` records. Those records do not match Nasdaq TotalView-ITCH 5.0 Order Replace. They are treated as aggregate price-level updates, as described in [docs/assumptions.md](docs/assumptions.md).
+
+## Current Book Model
+
+The current book keeps an order-ID hash table for order updates and aggregated price levels per side. Best bid/ask queries use bid/ask price-level heaps, and `orderbook_depth()` returns sorted top-N levels. The old per-order heaps remain internally as a shadow check during the price-level transition. `orderbook_apply()` is the decoded-message state-machine entry point; snapshots, restore, and `orderbook_state_hash()` support deterministic replay checks. `orderbook_match_limit()` provides simple price-time matching for crossing limit orders without changing normal parser behavior.
+
+See [docs/design.md](docs/design.md) for the current design notes and known limitations.
+
+## FABRIC Workflow
+
+FABRIC VM transfer scripts and the notebook live under [scripts/fabric/vm_link_test](scripts/fabric/vm_link_test). That workflow transfers the gzip file between VMs and then parses it offline on the receiver.
