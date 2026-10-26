@@ -123,8 +123,10 @@ static void on_parse_message(uint64_t timestamp, int applied, void *user_data)
 static void usage(const char *program)
 {
     fprintf(stderr,
-            "usage: %s <input.gz|event-log.csv> [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--max-messages N] [--progress-interval N] [--benchmark] [--replay]\n",
-            program);
+            "usage: %s <input.gz> --ticker SYMBOL [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--max-messages N] [--progress-interval N]\n"
+            "       %s <input> --benchmark\n"
+            "       %s <event-log.csv> --replay\n",
+            program, program, program);
 }
 
 static int parse_args(int argc, char **argv, Config *config)
@@ -184,6 +186,10 @@ static int parse_args(int argc, char **argv, Config *config)
         } else {
             return -1;
         }
+    }
+
+    if (config->run_mode == RUN_MODE_NORMAL && config->ticker[0] == '\0') {
+        return -1;
     }
 
     return 0;

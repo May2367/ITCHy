@@ -2,7 +2,7 @@
 
 ## Parser
 
-`parser_run_stream()` reads one gzip-framed message at a time, decodes supported message types into `OrderBookMessage`, and applies updates to an `OrderBook`. File opening, CSV output, replay event-log output, and benchmark timing live outside the parser.
+`parser_run_stream()` reads one gzip-framed message at a time, decodes supported message types into `OrderBookMessage`, and applies updates for the configured ticker to one `OrderBook`. File opening, ticker requirement enforcement, CSV output, replay event-log output, and benchmark timing live outside the parser.
 
 ## Book
 
@@ -50,6 +50,7 @@ The sample-specific 34-byte `U` records are represented as synthetic order IDs. 
 
 ## Limitations
 
+- Normal CLI parsing is single-symbol only and requires `--ticker`; multi-symbol book management is not implemented.
 - No live feed, packet replay, or DPDK path.
 - Depth is rebuilt on demand instead of maintained as a sorted structure.
 - Snapshot restore is an in-memory API; the replay event log is a local test/debug format, not a long-term compatibility contract.

@@ -55,8 +55,18 @@ $(SAN_DIR)/%.o: %.c
 	mkdir -p $(dir $@)
 	$(CC) $(CPPFLAGS) $(SAN_CFLAGS) -c $< -o $@
 
-test: $(TEST_TARGET)
+test: $(TARGET) $(TEST_TARGET)
 	./$(TEST_TARGET)
+	@if ./$(TARGET) /tmp/itchy_missing_ticker.gz --output /dev/null >/tmp/itchy_missing_ticker.out 2>/tmp/itchy_missing_ticker.err; then \
+		echo "missing ticker unexpectedly succeeded"; \
+		exit 1; \
+	else \
+		status=$$?; \
+		if [ $$status -ne 2 ]; then \
+			echo "missing ticker exited $$status, expected 2"; \
+			exit 1; \
+		fi; \
+	fi
 
 bench: build
 	./$(TARGET) synthetic --benchmark

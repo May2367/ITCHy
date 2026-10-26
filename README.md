@@ -1,6 +1,6 @@
 # ITCHy
 
-ITCHy is an offline parser and order book engine for a gzip-compressed, length-prefixed ITCH-style feed. It reads records from a file, applies supported book updates, and can emit top-of-book CSV rows or run the built-in benchmark mode.
+ITCHy is an offline parser and single-symbol order book engine for a gzip-compressed, length-prefixed ITCH-style feed. It reads records from a file, applies supported book updates for one requested ticker, and can emit top-of-book CSV rows or run the built-in benchmark mode.
 
 It is not a live market data gateway. It does not use DPDK, packet replay, sockets, or Kafka. The parser path applies feed updates offline; the matching engine is an opt-in API for synthetic crossing orders. An optional publisher thread can drain top-of-book events to a CSV file sink, and an event-log/replay path can check deterministic state hashes from local files.
 
@@ -41,11 +41,12 @@ Benchmark mode uses a fixed-seed synthetic apply workload. The positional input 
 ## Usage
 
 ```sh
-./itchy input.gz [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--max-messages N] [--progress-interval N] [--benchmark]
+./itchy input.gz --ticker SYMBOL [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--max-messages N] [--progress-interval N]
+./itchy synthetic --benchmark
 ./itchy event-log.csv --replay
 ```
 
-Normal mode writes CSV with:
+Normal parse mode requires `--ticker SYMBOL`; it writes CSV for that single-symbol book with:
 
 ```text
 timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
@@ -55,7 +56,7 @@ timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
 
 `--event-log FILE` writes the decoded applied order-book messages with a sequence number and post-apply state hash. `--replay` reads that log, reapplies each message, checks sequence continuity, and compares the stored hash after every event. This is a local deterministic replay check; it is separate from the top-of-book publisher CSV and does not require Kafka.
 
-`--max-messages N` stops normal parsing after N framed input messages. Normal parse runs report elapsed seconds and messages per second on stderr with the message counters, which is useful for bounded real-feed measurements. `--progress-interval N` prints live progress every N input messages during long runs.
+`--max-messages N` stops normal parsing after N framed input messages. Normal parse runs report elapsed seconds and messages per second on stderr with the message counters, which is useful for bounded real-feed measurements. `--progress-interval N` prints live progress every N input messages during long runs. Records for other tickers are counted as ignored and do not mutate the book.
 
 Benchmark mode generates deterministic synthetic workloads, runs warmup passes, then reports single-threaded apply performance, a two-thread SPSC producer/consumer comparison, a file-sink publisher comparison, and a matching-engine workload. Environment variables control the run: `ITCHY_BENCH_MESSAGES`, `ITCHY_BENCH_RUNS`, `ITCHY_BENCH_WARMUP_RUNS`, `ITCHY_BENCH_BATCH`, `ITCHY_BENCH_RING`, `ITCHY_MATCH_BENCH_MESSAGES`, and `ITCHY_BENCH_SEED`.
 
