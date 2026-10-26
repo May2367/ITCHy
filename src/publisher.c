@@ -7,6 +7,7 @@
 #include <sched.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 typedef struct {
@@ -20,8 +21,19 @@ typedef struct {
     unsigned stop;
 } BookEvent;
 
-static void write_event(FILE *output, const BookEvent *event)
+struct EventSink {
+    void *ctx;
+    int (*write)(void *ctx, const BookEvent *event);
+    int (*close)(void *ctx);
+};
+
+typedef struct {
+    FILE *output;
+} FileSink;
+
+static int file_sink_write(void *ctx, const BookEvent *event)
 {
+    FileSink *sink = ctx;
     char bid_price[32] = "";
     char ask_price[32] = "";
     char spread[32] = "";
@@ -36,11 +48,63 @@ static void write_event(FILE *output, const BookEvent *event)
         format_price(spread, sizeof(spread), event->ask_price - event->bid_price);
     }
 
-    fprintf(output, "%llu,%s,%llu,%s,%llu,%s\n",
+    fprintf(sink->output, "%llu,%s,%llu,%s,%llu,%s\n",
             (unsigned long long)event->timestamp,
             bid_price, (unsigned long long)event->bid_shares,
             ask_price, (unsigned long long)event->ask_shares,
             spread);
+    return ferror(sink->output) ? -1 : 0;
+}
+
+static int file_sink_close(void *ctx)
+{
+    FileSink *sink = ctx;
+    int status = 0;
+
+    if (sink->output != NULL) {
+        if (fflush(sink->output) != 0) {
+            status = -1;
+        }
+        if (fclose(sink->output) != 0) {
+            status = -1;
+        }
+    }
+    free(sink);
+    return status;
+}
+
+static EventSink *file_sink_open(const char *path)
+{
+    EventSink *sink;
+    FileSink *file;
+
+    file = calloc(1, sizeof(*file));
+    sink = calloc(1, sizeof(*sink));
+    if (file == NULL || sink == NULL) {
+        free(file);
+        free(sink);
+        return NULL;
+    }
+
+    file->output = fopen(path, "w");
+    if (file->output == NULL) {
+        free(file);
+        free(sink);
+        return NULL;
+    }
+
+    fprintf(file->output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
+    if (ferror(file->output)) {
+        fclose(file->output);
+        free(file);
+        free(sink);
+        return NULL;
+    }
+
+    sink->ctx = file;
+    sink->write = file_sink_write;
+    sink->close = file_sink_close;
+    return sink;
 }
 
 static void *publisher_main(void *arg)
@@ -48,7 +112,6 @@ static void *publisher_main(void *arg)
     EventPublisher *publisher = arg;
     int done = 0;
 
-    fprintf(publisher->output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
     while (!done) {
         BookEvent event;
         if (!spsc_ring_pop(&publisher->ring, &event)) {
@@ -60,8 +123,7 @@ static void *publisher_main(void *arg)
             continue;
         }
 
-        write_event(publisher->output, &event);
-        if (ferror(publisher->output)) {
+        if (publisher->sink->write(publisher->sink->ctx, &event) != 0) {
             publisher->write_error = 1;
             done = 1;
         } else {
@@ -69,36 +131,48 @@ static void *publisher_main(void *arg)
         }
     }
 
-    if (fflush(publisher->output) != 0) {
-        publisher->write_error = 1;
-    }
     return NULL;
 }
 
-int event_publisher_start(EventPublisher *publisher, const char *path, size_t capacity)
+static int event_publisher_start_sink(EventPublisher *publisher, EventSink *sink,
+                                      size_t capacity)
 {
     memset(publisher, 0, sizeof(*publisher));
-    if (path == NULL || capacity < 2) {
+    if (sink == NULL || capacity < 2) {
         return -1;
     }
 
-    publisher->output = fopen(path, "w");
-    if (publisher->output == NULL) {
-        return -1;
-    }
+    publisher->sink = sink;
     if (spsc_ring_init(&publisher->ring, capacity, sizeof(BookEvent)) != 0) {
-        fclose(publisher->output);
-        publisher->output = NULL;
+        publisher->sink = NULL;
         return -1;
     }
     if (pthread_create(&publisher->thread, NULL, publisher_main, publisher) != 0) {
         spsc_ring_free(&publisher->ring);
-        fclose(publisher->output);
-        publisher->output = NULL;
+        publisher->sink = NULL;
         return -1;
     }
 
     publisher->started = 1;
+    return 0;
+}
+
+int event_publisher_start_file(EventPublisher *publisher, const char *path, size_t capacity)
+{
+    EventSink *sink;
+    if (path == NULL) {
+        return -1;
+    }
+
+    sink = file_sink_open(path);
+    if (sink == NULL) {
+        return -1;
+    }
+    if (event_publisher_start_sink(publisher, sink, capacity) != 0) {
+        sink->close(sink->ctx);
+        free(sink);
+        return -1;
+    }
     return 0;
 }
 
@@ -135,6 +209,7 @@ int event_publisher_publish(EventPublisher *publisher, uint64_t timestamp,
 int event_publisher_stop(EventPublisher *publisher)
 {
     BookEvent stop = {0};
+    EventSink *sink;
     int status;
 
     if (publisher == NULL || !publisher->started) {
@@ -149,10 +224,12 @@ int event_publisher_stop(EventPublisher *publisher)
     pthread_join(publisher->thread, NULL);
     status = publisher->write_error ? -1 : 0;
     spsc_ring_free(&publisher->ring);
-    if (fclose(publisher->output) != 0) {
+    sink = publisher->sink;
+    publisher->sink = NULL;
+    if (sink->close(sink->ctx) != 0) {
         status = -1;
     }
-    publisher->output = NULL;
+    free(sink);
     publisher->started = 0;
     return status;
 }

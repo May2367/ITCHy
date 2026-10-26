@@ -18,3 +18,6 @@
 # editor/notebook noise
 .ipynb_checkpoints/
 *.ipynb_checkpoints/
+# local planning notes
+/plan.txt
+/progress.txt

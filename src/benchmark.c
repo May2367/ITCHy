@@ -337,7 +337,7 @@ static int run_published_pass(const BenchMsg *msgs, size_t count, size_t batch_s
     if (orderbook_init(&book) != 0) {
         return -1;
     }
-    if (event_publisher_start(&publisher, "/dev/null", ring_capacity) != 0) {
+    if (event_publisher_start_file(&publisher, "/dev/null", ring_capacity) != 0) {
         orderbook_free(&book);
         return -1;
     }

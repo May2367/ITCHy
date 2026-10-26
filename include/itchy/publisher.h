@@ -7,7 +7,6 @@
 #include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 
 typedef struct {
     uint64_t enqueued;
@@ -16,9 +15,11 @@ typedef struct {
     int write_error;
 } EventPublisherStats;
 
+typedef struct EventSink EventSink;
+
 typedef struct {
     SpscRing ring;
-    FILE *output;
+    EventSink *sink;
     pthread_t thread;
     uint64_t enqueued;
     uint64_t dropped;
@@ -27,7 +28,7 @@ typedef struct {
     int started;
 } EventPublisher;
 
-int event_publisher_start(EventPublisher *publisher, const char *path, size_t capacity);
+int event_publisher_start_file(EventPublisher *publisher, const char *path, size_t capacity);
 int event_publisher_publish(EventPublisher *publisher, uint64_t timestamp,
                             const Order *bid, const Order *ask);
 int event_publisher_stop(EventPublisher *publisher);

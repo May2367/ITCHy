@@ -246,7 +246,7 @@ static void test_event_publisher(void)
     char line[256];
     int lines = 0;
 
-    CHECK(event_publisher_start(&publisher, path, 8) == 0);
+    CHECK(event_publisher_start_file(&publisher, path, 8) == 0);
     CHECK(event_publisher_publish(&publisher, 100, &bid, &ask) == 1);
     CHECK(event_publisher_publish(&publisher, 200, &bid, NULL) == 1);
     CHECK(event_publisher_publish(&publisher, 300, NULL, &ask) == 1);

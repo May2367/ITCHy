@@ -69,7 +69,7 @@ The sample feed this project was built around contains non-standard 34-byte `U` 
 
 ## Current Book Model
 
-The current book keeps an order-ID hash table for order updates and aggregated price levels per side. Best bid/ask queries use bid/ask price-level heaps, and `orderbook_depth()` returns sorted top-N levels. The old per-order heaps remain internally as a shadow check during the price-level transition. `orderbook_apply()` is the decoded-message state-machine entry point; snapshots, restore, and `orderbook_state_hash()` support deterministic replay checks. `orderbook_match_limit()` provides simple price-time matching for crossing limit orders without changing normal parser behavior. The optional publisher path keeps file writes off the parser callback path by enqueueing top-of-book events into a bounded SPSC ring.
+The current book keeps an order-ID hash table for order updates and aggregated price levels per side. Best bid/ask queries use bid/ask price-level heaps, and `orderbook_depth()` returns sorted top-N levels. The old per-order heaps remain internally as a shadow check during the price-level transition. `orderbook_apply()` is the decoded-message state-machine entry point; snapshots, restore, and `orderbook_state_hash()` support deterministic replay checks. `orderbook_match_limit()` provides simple price-time matching for crossing limit orders without changing normal parser behavior. The optional publisher path keeps file writes off the parser callback path by enqueueing top-of-book events into a bounded SPSC ring. The publisher drains through a small sink interface; the implemented sink is CSV file output.
 
 See [docs/design.md](docs/design.md) for the current design notes and known limitations.
 

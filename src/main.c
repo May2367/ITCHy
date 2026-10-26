@@ -146,7 +146,7 @@ int main(int argc, char **argv)
         ParseResult result;
 
         if (config.publish_path != NULL) {
-            if (event_publisher_start(&publisher, config.publish_path,
+            if (event_publisher_start_file(&publisher, config.publish_path,
                                       (size_t)config.publish_ring_capacity) != 0) {
                 perror(config.publish_path);
                 status = 1;
