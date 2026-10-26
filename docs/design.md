@@ -2,7 +2,7 @@
 
 ## Parser
 
-`parser_run_stream()` reads one gzip-framed message at a time, decodes supported message types, and applies updates to an `OrderBook`. File opening, CSV output, and benchmark timing live outside the parser.
+`parser_run_stream()` reads one gzip-framed message at a time, decodes supported message types into `OrderBookMessage`, and applies updates to an `OrderBook`. File opening, CSV output, replay event-log output, and benchmark timing live outside the parser.
 
 ## Book
 
@@ -22,6 +22,8 @@ A sorted array would make depth reads cheap but would shift more cost into inser
 `orderbook_apply()` wraps the decoded book operations in one small message API. The parser still decodes feed records the same way, but tests and benchmarks can replay decoded operations through one deterministic entry point.
 
 `orderbook_snapshot()` serializes the active orders into a byte buffer sorted by order ID. The heaps and price-level hashes are treated as derived state and rebuilt by `orderbook_restore()`. `orderbook_state_hash()` hashes that serialized image, so two runs with the same final active orders compare equal even if hash-table iteration or heap insertion order differed internally.
+
+The local replay path writes decoded applied messages as CSV with `seq,timestamp_ns,type,order_id,new_order_id,side,shares,price,stock,state_hash`. `--replay` reads that file, checks sequence continuity, reapplies each message through `orderbook_apply()`, and compares the post-apply state hash after every event. This log is intentionally the state-machine input stream, not the publisher top-of-book stream; top-of-book rows are useful for consumers but do not contain enough information to rebuild the full book.
 
 ## Matching Engine
 
@@ -50,5 +52,5 @@ The sample-specific 34-byte `U` records are represented as synthetic order IDs. 
 
 - No live feed, packet replay, or DPDK path.
 - Depth is rebuilt on demand instead of maintained as a sorted structure.
-- Snapshot restore is an in-memory API; there is no external snapshot file format or compatibility promise yet.
+- Snapshot restore is an in-memory API; the replay event log is a local test/debug format, not a long-term compatibility contract.
 - Benchmark mode uses fixed-seed synthetic workloads and reports single-threaded apply, SPSC-threaded apply, publisher file-sink, and matching-engine throughput plus batched per-message latency.

@@ -33,7 +33,6 @@ static int layout_for(size_t len, size_t no_tracking_len, Layout *layout)
     return 0;
 }
 
-
 static uint64_t fnv1a64(const unsigned char *data, size_t len)
 {
     uint64_t h = 1469598103934665603ull;
@@ -55,7 +54,7 @@ static int set_timestamp(const unsigned char *msg, size_t len, size_t no_trackin
 }
 
 static int parse_add(const unsigned char *msg, size_t len, const Config *config,
-                     OrderBook *book, uint64_t *timestamp)
+                     uint64_t *timestamp, OrderBookMessage *decoded)
 {
     Layout layout;
     const unsigned char *p;
@@ -71,12 +70,18 @@ static int parse_add(const unsigned char *msg, size_t len, const Config *config,
         return 0;
     }
 
-    return orderbook_add(book, read_uint64_be(p), (char)p[8], read_uint32_be(p + 9),
-                         stock, read_uint32_be(p + 21));
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_ADD;
+    decoded->order_id = read_uint64_be(p);
+    decoded->side = (char)p[8];
+    decoded->shares = read_uint32_be(p + 9);
+    decoded->price = read_uint32_be(p + 21);
+    memcpy(decoded->stock, stock, ITCHY_TICKER_LEN + 1);
+    return 1;
 }
 
-static int parse_execute(const unsigned char *msg, size_t len, OrderBook *book,
-                         uint64_t *timestamp)
+static int parse_execute(const unsigned char *msg, size_t len, uint64_t *timestamp,
+                         OrderBookMessage *decoded)
 {
     Layout layout;
     const unsigned char *p;
@@ -86,11 +91,15 @@ static int parse_execute(const unsigned char *msg, size_t len, OrderBook *book,
     }
 
     p = msg + layout.payload_offset;
-    return orderbook_execute(book, read_uint64_be(p), read_uint32_be(p + 8));
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_EXECUTE;
+    decoded->order_id = read_uint64_be(p);
+    decoded->shares = read_uint32_be(p + 8);
+    return 1;
 }
 
-static int parse_execute_price(const unsigned char *msg, size_t len, OrderBook *book,
-                               uint64_t *timestamp)
+static int parse_execute_price(const unsigned char *msg, size_t len, uint64_t *timestamp,
+                               OrderBookMessage *decoded)
 {
     Layout layout;
     const unsigned char *p;
@@ -100,11 +109,15 @@ static int parse_execute_price(const unsigned char *msg, size_t len, OrderBook *
     }
 
     p = msg + layout.payload_offset;
-    return orderbook_execute(book, read_uint64_be(p), read_uint32_be(p + 8));
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_EXECUTE;
+    decoded->order_id = read_uint64_be(p);
+    decoded->shares = read_uint32_be(p + 8);
+    return 1;
 }
 
-static int parse_cancel(const unsigned char *msg, size_t len, OrderBook *book,
-                        uint64_t *timestamp)
+static int parse_cancel(const unsigned char *msg, size_t len, uint64_t *timestamp,
+                        OrderBookMessage *decoded)
 {
     Layout layout;
     const unsigned char *p;
@@ -114,11 +127,15 @@ static int parse_cancel(const unsigned char *msg, size_t len, OrderBook *book,
     }
 
     p = msg + layout.payload_offset;
-    return orderbook_cancel(book, read_uint64_be(p), read_uint32_be(p + 8));
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_CANCEL;
+    decoded->order_id = read_uint64_be(p);
+    decoded->shares = read_uint32_be(p + 8);
+    return 1;
 }
 
-static int parse_delete(const unsigned char *msg, size_t len, OrderBook *book,
-                        uint64_t *timestamp)
+static int parse_delete(const unsigned char *msg, size_t len, uint64_t *timestamp,
+                        OrderBookMessage *decoded)
 {
     Layout layout;
 
@@ -126,11 +143,14 @@ static int parse_delete(const unsigned char *msg, size_t len, OrderBook *book,
         return 0;
     }
 
-    return orderbook_delete(book, read_uint64_be(msg + layout.payload_offset));
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_DELETE;
+    decoded->order_id = read_uint64_be(msg + layout.payload_offset);
+    return 1;
 }
 
-static int parse_replace(const unsigned char *msg, size_t len, OrderBook *book,
-                         uint64_t *timestamp)
+static int parse_replace(const unsigned char *msg, size_t len, uint64_t *timestamp,
+                         OrderBookMessage *decoded)
 {
     Layout layout;
     const unsigned char *p;
@@ -140,8 +160,13 @@ static int parse_replace(const unsigned char *msg, size_t len, OrderBook *book,
     }
 
     p = msg + layout.payload_offset;
-    return orderbook_replace(book, read_uint64_be(p), read_uint64_be(p + 8),
-                             read_uint32_be(p + 16), read_uint32_be(p + 20));
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_REPLACE;
+    decoded->order_id = read_uint64_be(p);
+    decoded->new_order_id = read_uint64_be(p + 8);
+    decoded->shares = read_uint32_be(p + 16);
+    decoded->price = read_uint32_be(p + 20);
+    return 1;
 }
 
 static int parse_trade_or_cross(const unsigned char *msg, size_t len, const Config *config,
@@ -169,7 +194,7 @@ static int parse_trade_or_cross(const unsigned char *msg, size_t len, const Conf
 }
 
 static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config *config,
-                              OrderBook *book, uint64_t *timestamp)
+                              uint64_t *timestamp, OrderBookMessage *decoded)
 {
     char stock[ITCHY_TICKER_LEN + 1];
     unsigned char key[1 + ITCHY_TICKER_LEN + 4 + 4];
@@ -197,7 +222,15 @@ static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config
     memcpy(key + 1 + ITCHY_TICKER_LEN, msg + 26, 4);
     memcpy(key + 1 + ITCHY_TICKER_LEN + 4, msg + 30, 4);
     level_id = fnv1a64(key, sizeof(key));
-    return orderbook_upsert_level(book, level_id, side, shares, stock, price);
+
+    memset(decoded, 0, sizeof(*decoded));
+    decoded->type = ORDERBOOK_MSG_UPSERT_LEVEL;
+    decoded->order_id = level_id;
+    decoded->side = side;
+    decoded->shares = shares;
+    decoded->price = price;
+    memcpy(decoded->stock, stock, ITCHY_TICKER_LEN + 1);
+    return 1;
 }
 
 static int parse_admin_timestamp(const unsigned char *msg, size_t len, uint64_t *timestamp)
@@ -230,6 +263,13 @@ ParseResult parser_run_stream(gzFile input, const Config *config,
 
     for (;;) {
         int len_read;
+        uint16_t len;
+        int decoded = 0;
+        int applied = 0;
+        int recognized = 1;
+        int known_ignored = 0;
+        uint64_t timestamp = result.last_timestamp;
+        OrderBookMessage decoded_msg;
 
         if (options != NULL && options->max_messages > 0 &&
             result.messages_read >= options->max_messages) {
@@ -237,12 +277,6 @@ ParseResult parser_run_stream(gzFile input, const Config *config,
         }
 
         len_read = gzread(input, len_buf, sizeof(len_buf));
-        uint16_t len;
-        int applied = 0;
-        int recognized = 1;
-        int known_ignored = 0;
-        uint64_t timestamp = result.last_timestamp;
-
         if (len_read == 0) {
             break;
         }
@@ -264,28 +298,29 @@ ParseResult parser_run_stream(gzFile input, const Config *config,
         }
 
         result.messages_read++;
+        memset(&decoded_msg, 0, sizeof(decoded_msg));
 
         switch (msg[0]) {
         case 'A':
         case 'F':
-            applied = parse_add(msg, len, config, &book, &timestamp);
+            decoded = parse_add(msg, len, config, &timestamp, &decoded_msg);
             break;
         case 'E':
-            applied = parse_execute(msg, len, &book, &timestamp);
+            decoded = parse_execute(msg, len, &timestamp, &decoded_msg);
             break;
         case 'C':
-            applied = parse_execute_price(msg, len, &book, &timestamp);
+            decoded = parse_execute_price(msg, len, &timestamp, &decoded_msg);
             break;
         case 'X':
-            applied = parse_cancel(msg, len, &book, &timestamp);
+            decoded = parse_cancel(msg, len, &timestamp, &decoded_msg);
             break;
         case 'D':
-            applied = parse_delete(msg, len, &book, &timestamp);
+            decoded = parse_delete(msg, len, &timestamp, &decoded_msg);
             break;
         case 'U':
-            applied = parse_replace(msg, len, &book, &timestamp);
-            if (applied == 0) {
-                applied = parse_tvagg_update(msg, len, config, &book, &timestamp);
+            decoded = parse_replace(msg, len, &timestamp, &decoded_msg);
+            if (decoded == 0) {
+                decoded = parse_tvagg_update(msg, len, config, &timestamp, &decoded_msg);
             }
             break;
         case 'P':
@@ -318,6 +353,9 @@ ParseResult parser_run_stream(gzFile input, const Config *config,
         }
 
         result.last_timestamp = timestamp;
+        if (decoded > 0) {
+            applied = orderbook_apply(&book, &decoded_msg, NULL);
+        }
         if (applied < 0) {
             result.io_error = ENOMEM;
             break;
@@ -328,6 +366,15 @@ ParseResult parser_run_stream(gzFile input, const Config *config,
                 options->book_callback(timestamp, orderbook_best_bid(&book),
                                        orderbook_best_ask(&book),
                                        options->book_user_data);
+            }
+            if (options != NULL && options->applied_message_callback != NULL) {
+                uint64_t state_hash;
+                if (orderbook_state_hash(&book, &state_hash) != 0) {
+                    result.io_error = ENOMEM;
+                    break;
+                }
+                options->applied_message_callback(timestamp, &decoded_msg, state_hash,
+                                                  options->applied_message_user_data);
             }
         } else if (recognized || known_ignored) {
             result.messages_ignored++;

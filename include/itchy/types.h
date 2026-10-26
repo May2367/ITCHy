@@ -9,13 +9,15 @@
 #define ITCHY_TICKER_LEN 8
 typedef enum {
     RUN_MODE_NORMAL = 0,
-    RUN_MODE_BENCHMARK = 1
+    RUN_MODE_BENCHMARK = 1,
+    RUN_MODE_REPLAY = 2
 } RunMode;
 
 typedef struct {
     const char *input_path;
     const char *output_path;
     const char *publish_path;
+    const char *event_log_path;
     char ticker[ITCHY_TICKER_LEN + 1];
     uint64_t update_interval_ns;
     uint64_t publish_ring_capacity;

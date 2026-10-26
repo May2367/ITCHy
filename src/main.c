@@ -1,6 +1,7 @@
 #include "benchmark.h"
 #include "parser.h"
 #include "publisher.h"
+#include "replay.h"
 #include "types.h"
 #include "utils.h"
 
@@ -20,6 +21,7 @@ typedef struct {
 typedef struct {
     CsvEmitter emitter;
     EventPublisher *publisher;
+    EventLogWriter *event_log;
 } BookCallbacks;
 
 static void emit_spread(uint64_t timestamp, const Order *bid, const Order *ask,
@@ -65,10 +67,21 @@ static void on_book_update(uint64_t timestamp, const Order *bid, const Order *as
     event_publisher_publish(callbacks->publisher, timestamp, bid, ask);
 }
 
+static void on_applied_message(uint64_t timestamp, const OrderBookMessage *message,
+                               uint64_t state_hash, void *user_data)
+{
+    BookCallbacks *callbacks = user_data;
+
+    if (callbacks == NULL || callbacks->event_log == NULL) {
+        return;
+    }
+    event_log_writer_write(callbacks->event_log, timestamp, message, state_hash);
+}
+
 static void usage(const char *program)
 {
     fprintf(stderr,
-            "usage: %s <input.gz> [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--benchmark]\n",
+            "usage: %s <input.gz|event-log.csv> [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--benchmark] [--replay]\n",
             program);
 }
 
@@ -99,6 +112,8 @@ static int parse_args(int argc, char **argv, Config *config)
             }
         } else if (strcmp(argv[i], "--publish") == 0 && i + 1 < argc) {
             config->publish_path = argv[++i];
+        } else if (strcmp(argv[i], "--event-log") == 0 && i + 1 < argc) {
+            config->event_log_path = argv[++i];
         } else if (strcmp(argv[i], "--publish-ring") == 0 && i + 1 < argc) {
             char *end = NULL;
             errno = 0;
@@ -108,6 +123,8 @@ static int parse_args(int argc, char **argv, Config *config)
             }
         } else if (strcmp(argv[i], "--benchmark") == 0) {
             config->run_mode = RUN_MODE_BENCHMARK;
+        } else if (strcmp(argv[i], "--replay") == 0) {
+            config->run_mode = RUN_MODE_REPLAY;
         } else {
             return -1;
         }
@@ -122,7 +139,9 @@ int main(int argc, char **argv)
     FILE *output = stdout;
     gzFile input = NULL;
     EventPublisher publisher;
+    EventLogWriter event_log;
     int publisher_started = 0;
+    int event_log_started = 0;
     int status = 0;
 
     if (parse_args(argc, argv, &config) != 0) {
@@ -140,10 +159,38 @@ int main(int argc, char **argv)
 
     if (config.run_mode == RUN_MODE_BENCHMARK) {
         status = benchmark_run(&config, output);
+    } else if (config.run_mode == RUN_MODE_REPLAY) {
+        ReplayResult replay;
+        if (replay_check_file(config.input_path, &replay) != 0) {
+            status = 1;
+        }
+        fprintf(output, "events_checked=%llu\n",
+                (unsigned long long)replay.events_checked);
+        fprintf(output, "sequence_gaps=%llu\n",
+                (unsigned long long)replay.sequence_gaps);
+        fprintf(output, "hash_mismatches=%llu\n",
+                (unsigned long long)replay.hash_mismatches);
+        fprintf(output, "malformed_lines=%llu\n",
+                (unsigned long long)replay.malformed_lines);
+        fprintf(output, "final_hash=%llu\n",
+                (unsigned long long)replay.final_hash);
+        if (replay.io_error != 0) {
+            fprintf(output, "io_error=%d\n", replay.io_error);
+        }
     } else {
         ParserRunOptions options = {0};
-        BookCallbacks callbacks = {{output, config.update_interval_ns, 0}, NULL};
+        BookCallbacks callbacks = {{output, config.update_interval_ns, 0}, NULL, NULL};
         ParseResult result;
+
+        if (config.event_log_path != NULL) {
+            if (event_log_writer_open(&event_log, config.event_log_path) != 0) {
+                perror(config.event_log_path);
+                status = 1;
+                goto cleanup;
+            }
+            event_log_started = 1;
+            callbacks.event_log = &event_log;
+        }
 
         if (config.publish_path != NULL) {
             if (event_publisher_start_file(&publisher, config.publish_path,
@@ -166,11 +213,20 @@ int main(int argc, char **argv)
         fprintf(output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
         options.book_callback = on_book_update;
         options.book_user_data = &callbacks;
+        options.applied_message_callback = on_applied_message;
+        options.applied_message_user_data = &callbacks;
         result = parser_run_stream(input, &config, &options);
         if (gzclose(input) != Z_OK && result.io_error == 0) {
             result.io_error = EIO;
         }
         input = NULL;
+
+        if (event_log_started) {
+            if (event_log_writer_close(&event_log) != 0 && result.io_error == 0) {
+                result.io_error = EIO;
+            }
+            event_log_started = 0;
+        }
 
         if (publisher_started) {
             EventPublisherStats stats;
@@ -198,6 +254,12 @@ int main(int argc, char **argv)
     }
 
 cleanup:
+    if (event_log_started) {
+        if (event_log_writer_close(&event_log) != 0) {
+            status = 1;
+        }
+    }
+
     if (publisher_started) {
         if (event_publisher_stop(&publisher) != 0) {
             status = 1;

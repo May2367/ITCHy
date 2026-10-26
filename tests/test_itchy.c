@@ -2,6 +2,7 @@
 #include "orderbook.h"
 #include "parser.h"
 #include "publisher.h"
+#include "replay.h"
 #include "spsc_ring.h"
 #include "types.h"
 #include "utils.h"
@@ -21,6 +22,9 @@
 typedef struct {
     uint64_t callbacks;
     uint64_t last_timestamp;
+    uint64_t applied_callbacks;
+    uint64_t last_state_hash;
+    OrderBookMessageType last_message_type;
     uint32_t last_bid_price;
     uint64_t last_bid_shares;
     uint32_t last_ask_price;
@@ -181,6 +185,16 @@ static void on_book(uint64_t timestamp, const Order *bid, const Order *ask, void
     events->last_ask_shares = ask == NULL ? 0 : ask->shares;
 }
 
+static void on_applied(uint64_t timestamp, const OrderBookMessage *message,
+                       uint64_t state_hash, void *user_data)
+{
+    ParserEvents *events = user_data;
+    (void)timestamp;
+    events->applied_callbacks++;
+    events->last_state_hash = state_hash;
+    events->last_message_type = message->type;
+}
+
 static ParseResult run_fixture(const char *path, const char *ticker, ParserEvents *events)
 {
     Config config = {0};
@@ -195,6 +209,8 @@ static ParseResult run_fixture(const char *path, const char *ticker, ParserEvent
     if (events != NULL) {
         options.book_callback = on_book;
         options.book_user_data = events;
+        options.applied_message_callback = on_applied;
+        options.applied_message_user_data = events;
     }
 
     in = gzopen(path, "rb");
@@ -286,6 +302,40 @@ static void test_event_publisher(void)
     CHECK(strncmp(line, "2,300,", 6) == 0);
     CHECK(fgets(line, sizeof(line), in) == NULL);
     CHECK(fclose(in) == 0);
+}
+
+
+static void test_event_log_replay(void)
+{
+    const char *path = "tests/tmp_event_log.csv";
+    EventLogWriter writer;
+    ReplayResult result;
+    OrderBook book;
+    uint64_t hash = 0;
+    OrderBookMessage msgs[] = {
+        {.type = ORDERBOOK_MSG_ADD, .order_id = 1, .side = 'B', .shares = 100, .price = 100000, .stock = "AMAT"},
+        {.type = ORDERBOOK_MSG_ADD, .order_id = 2, .side = 'S', .shares = 80, .price = 100500, .stock = "AMAT"},
+        {.type = ORDERBOOK_MSG_CANCEL, .order_id = 1, .shares = 25},
+        {.type = ORDERBOOK_MSG_REPLACE, .order_id = 2, .new_order_id = 3, .shares = 40, .price = 100400},
+        {.type = ORDERBOOK_MSG_UPSERT_LEVEL, .order_id = 900, .side = 'S', .shares = 70, .price = 100300, .stock = "AMAT"}
+    };
+
+    CHECK(orderbook_init(&book) == 0);
+    CHECK(event_log_writer_open(&writer, path) == 0);
+    for (size_t i = 0; i < sizeof(msgs) / sizeof(msgs[0]); i++) {
+        CHECK(orderbook_apply(&book, &msgs[i], NULL) == 1);
+        CHECK(orderbook_state_hash(&book, &hash) == 0);
+        CHECK(event_log_writer_write(&writer, 100 + i, &msgs[i], hash) == 0);
+    }
+    CHECK(event_log_writer_close(&writer) == 0);
+
+    CHECK(replay_check_file(path, &result) == 0);
+    CHECK(result.events_checked == sizeof(msgs) / sizeof(msgs[0]));
+    CHECK(result.sequence_gaps == 0);
+    CHECK(result.hash_mismatches == 0);
+    CHECK(result.malformed_lines == 0);
+    CHECK(result.final_hash == hash);
+    orderbook_free(&book);
 }
 
 static void test_utils(void)
@@ -718,6 +768,9 @@ static void test_parser_fixture(void)
     CHECK(result.malformed_messages == 0);
     CHECK(result.last_timestamp == 600);
     CHECK(events.callbacks == 5);
+    CHECK(events.applied_callbacks == 5);
+    CHECK(events.last_state_hash != 0);
+    CHECK(events.last_message_type == ORDERBOOK_MSG_UPSERT_LEVEL);
     CHECK(events.last_timestamp == 500);
     CHECK(events.last_bid_price == 100000);
     CHECK(events.last_bid_shares == 75);
@@ -761,6 +814,9 @@ static void test_parser_standard_itch_messages(void)
     CHECK(result.malformed_messages == 0);
     CHECK(result.last_timestamp == 160);
     CHECK(events.callbacks == 6);
+    CHECK(events.applied_callbacks == 6);
+    CHECK(events.last_state_hash != 0);
+    CHECK(events.last_message_type == ORDERBOOK_MSG_EXECUTE);
     CHECK(events.last_timestamp == 160);
     CHECK(events.last_bid_price == 0);
     CHECK(events.last_ask_price == 100300);
@@ -801,6 +857,9 @@ static void test_parser_aggregate_u_edges(void)
     CHECK(result.malformed_messages == 0);
     CHECK(result.last_timestamp == 150);
     CHECK(events.callbacks == 4);
+    CHECK(events.applied_callbacks == 4);
+    CHECK(events.last_state_hash != 0);
+    CHECK(events.last_message_type == ORDERBOOK_MSG_UPSERT_LEVEL);
     CHECK(events.last_timestamp == 140);
     CHECK(events.last_bid_price == 100200);
     CHECK(events.last_bid_shares == 90);
@@ -840,6 +899,7 @@ int main(void)
 {
     test_spsc_ring();
     test_event_publisher();
+    test_event_log_replay();
     test_utils();
     test_heap();
     test_orderbook();
