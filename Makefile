@@ -28,7 +28,8 @@ TMP_FIXTURES := tests/tmp_parser_fixture.gz \
 	tests/tmp_parser_bad_len.gz \
 	tests/tmp_parser_truncated.gz \
 	tests/tmp_events.csv \
-	tests/tmp_event_log.csv
+	tests/tmp_event_log.csv \
+	tests/tmp_event_log_bad.csv
 
 .PHONY: all build test bench test-sanitize clean
 

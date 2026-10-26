@@ -304,6 +304,13 @@ static void test_event_publisher(void)
     CHECK(fclose(in) == 0);
 }
 
+static void write_text_file(const char *path, const char *text)
+{
+    FILE *out = fopen(path, "w");
+    CHECK(out != NULL);
+    CHECK(fputs(text, out) >= 0);
+    CHECK(fclose(out) == 0);
+}
 
 static void test_event_log_replay(void)
 {
@@ -336,6 +343,64 @@ static void test_event_log_replay(void)
     CHECK(result.malformed_lines == 0);
     CHECK(result.final_hash == hash);
     orderbook_free(&book);
+}
+
+static void test_event_log_replay_failures(void)
+{
+    const char *path = "tests/tmp_event_log_bad.csv";
+    const char *header = "seq,timestamp_ns,type,order_id,new_order_id,side,shares,price,stock,state_hash\n";
+    ReplayResult result;
+    OrderBook book;
+    OrderBookMessage add = {
+        .type = ORDERBOOK_MSG_ADD,
+        .order_id = 1,
+        .side = 'B',
+        .shares = 100,
+        .price = 100000,
+        .stock = "AMAT"
+    };
+    uint64_t add_hash;
+    char line[512];
+
+    CHECK(orderbook_init(&book) == 0);
+    CHECK(orderbook_apply(&book, &add, NULL) == 1);
+    CHECK(orderbook_state_hash(&book, &add_hash) == 0);
+    orderbook_free(&book);
+
+    snprintf(line, sizeof(line), "%s1,100,ADD,1,0,B,100,100000,AMAT,%llu\n",
+             header, (unsigned long long)add_hash);
+    write_text_file(path, line);
+    CHECK(replay_check_file(path, &result) != 0);
+    CHECK(result.events_checked == 1);
+    CHECK(result.sequence_gaps == 1);
+    CHECK(result.hash_mismatches == 0);
+    CHECK(result.malformed_lines == 0);
+
+    snprintf(line, sizeof(line), "%s0,100,ADD,1,0,B,100,100000,AMAT,%llu\n",
+             header, (unsigned long long)(add_hash + 1));
+    write_text_file(path, line);
+    CHECK(replay_check_file(path, &result) != 0);
+    CHECK(result.events_checked == 1);
+    CHECK(result.sequence_gaps == 0);
+    CHECK(result.hash_mismatches == 1);
+    CHECK(result.malformed_lines == 0);
+
+    write_text_file(path,
+                    "seq,timestamp_ns,type,order_id,new_order_id,side,shares,price,stock,state_hash\n"
+                    "0,100,ADD,1,0,B,100\n");
+    CHECK(replay_check_file(path, &result) != 0);
+    CHECK(result.events_checked == 0);
+    CHECK(result.malformed_lines == 1);
+    CHECK(result.sequence_gaps == 0);
+    CHECK(result.hash_mismatches == 0);
+
+    snprintf(line, sizeof(line), "not,the,expected,header\n"
+             "0,100,ADD,1,0,B,100,100000,AMAT,%llu\n",
+             (unsigned long long)add_hash);
+    write_text_file(path, line);
+    CHECK(replay_check_file(path, &result) != 0);
+    CHECK(result.events_checked == 1);
+    CHECK(result.malformed_lines == 1);
 }
 
 static void test_utils(void)
@@ -900,6 +965,7 @@ int main(void)
     test_spsc_ring();
     test_event_publisher();
     test_event_log_replay();
+    test_event_log_replay_failures();
     test_utils();
     test_heap();
     test_orderbook();
