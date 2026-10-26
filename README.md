@@ -41,7 +41,7 @@ Benchmark mode uses a fixed-seed synthetic apply workload. The positional input 
 ## Usage
 
 ```sh
-./itchy input.gz [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--benchmark]
+./itchy input.gz [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--event-log FILE] [--max-messages N] [--progress-interval N] [--benchmark]
 ./itchy event-log.csv --replay
 ```
 
@@ -54,6 +54,8 @@ timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
 `--publish FILE` also sends top-of-book events through a bounded SPSC ring to a publisher thread. Publisher output adds a leading `seq` column before the normal CSV fields. If the ring fills, the hot path drops the event, consumes a sequence number, and reports the dropped count on stderr at shutdown.
 
 `--event-log FILE` writes the decoded applied order-book messages with a sequence number and post-apply state hash. `--replay` reads that log, reapplies each message, checks sequence continuity, and compares the stored hash after every event. This is a local deterministic replay check; it is separate from the top-of-book publisher CSV and does not require Kafka.
+
+`--max-messages N` stops normal parsing after N framed input messages. Normal parse runs report elapsed seconds and messages per second on stderr with the message counters, which is useful for bounded real-feed measurements. `--progress-interval N` prints live progress every N input messages during long runs.
 
 Benchmark mode generates deterministic synthetic workloads, runs warmup passes, then reports single-threaded apply performance, a two-thread SPSC producer/consumer comparison, a file-sink publisher comparison, and a matching-engine workload. Environment variables control the run: `ITCHY_BENCH_MESSAGES`, `ITCHY_BENCH_RUNS`, `ITCHY_BENCH_WARMUP_RUNS`, `ITCHY_BENCH_BATCH`, `ITCHY_BENCH_RING`, `ITCHY_MATCH_BENCH_MESSAGES`, and `ITCHY_BENCH_SEED`.
 

@@ -21,6 +21,8 @@ typedef struct {
     char ticker[ITCHY_TICKER_LEN + 1];
     uint64_t update_interval_ns;
     uint64_t publish_ring_capacity;
+    uint64_t max_messages;
+    uint64_t progress_interval;
     RunMode run_mode;
 } Config;
 

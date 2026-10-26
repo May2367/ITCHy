@@ -195,7 +195,8 @@ static void on_applied(uint64_t timestamp, const OrderBookMessage *message,
     events->last_message_type = message->type;
 }
 
-static ParseResult run_fixture(const char *path, const char *ticker, ParserEvents *events)
+static ParseResult run_fixture_limit(const char *path, const char *ticker,
+                                     ParserEvents *events, uint64_t max_messages)
 {
     Config config = {0};
     ParserRunOptions options = {0};
@@ -206,6 +207,7 @@ static ParseResult run_fixture(const char *path, const char *ticker, ParserEvent
         strcpy(config.ticker, ticker);
     }
     config.update_interval_ns = 0;
+    options.max_messages = max_messages;
     if (events != NULL) {
         options.book_callback = on_book;
         options.book_user_data = events;
@@ -218,6 +220,11 @@ static ParseResult run_fixture(const char *path, const char *ticker, ParserEvent
     result = parser_run_stream(in, &config, &options);
     CHECK(gzclose(in) == Z_OK);
     return result;
+}
+
+static ParseResult run_fixture(const char *path, const char *ticker, ParserEvents *events)
+{
+    return run_fixture_limit(path, ticker, events, 0);
 }
 
 
@@ -843,6 +850,30 @@ static void test_parser_fixture(void)
     CHECK(events.last_ask_shares == 200);
 }
 
+static void test_parser_max_messages(void)
+{
+    const char *path = "tests/tmp_parser_fixture.gz";
+    ParserEvents events = {0};
+    ParseResult result;
+
+    result = run_fixture_limit(path, "AMAT", &events, 3);
+
+    CHECK(result.io_error == 0);
+    CHECK(result.messages_read == 3);
+    CHECK(result.messages_applied == 3);
+    CHECK(result.messages_ignored == 0);
+    CHECK(result.unknown_messages == 0);
+    CHECK(result.malformed_messages == 0);
+    CHECK(result.last_timestamp == 300);
+    CHECK(events.callbacks == 3);
+    CHECK(events.applied_callbacks == 3);
+    CHECK(events.last_message_type == ORDERBOOK_MSG_CANCEL);
+    CHECK(events.last_bid_price == 100000);
+    CHECK(events.last_bid_shares == 75);
+    CHECK(events.last_ask_price == 100500);
+    CHECK(events.last_ask_shares == 50);
+}
+
 static void test_parser_standard_itch_messages(void)
 {
     const char *path = "tests/tmp_parser_standard.gz";
@@ -974,6 +1005,7 @@ int main(void)
     test_matching_engine();
     test_orderbook_state_machine();
     test_parser_fixture();
+    test_parser_max_messages();
     test_parser_standard_itch_messages();
     test_parser_aggregate_u_edges();
     test_parser_bad_records();
