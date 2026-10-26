@@ -11,6 +11,7 @@
 #include <string.h>
 
 typedef struct {
+    uint64_t sequence;
     uint64_t timestamp;
     uint64_t bid_shares;
     uint64_t ask_shares;
@@ -48,7 +49,8 @@ static int file_sink_write(void *ctx, const BookEvent *event)
         format_price(spread, sizeof(spread), event->ask_price - event->bid_price);
     }
 
-    fprintf(sink->output, "%llu,%s,%llu,%s,%llu,%s\n",
+    fprintf(sink->output, "%llu,%llu,%s,%llu,%s,%llu,%s\n",
+            (unsigned long long)event->sequence,
             (unsigned long long)event->timestamp,
             bid_price, (unsigned long long)event->bid_shares,
             ask_price, (unsigned long long)event->ask_shares,
@@ -93,7 +95,7 @@ static EventSink *file_sink_open(const char *path)
         return NULL;
     }
 
-    fprintf(file->output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
+    fprintf(file->output, "seq,timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
     if (ferror(file->output)) {
         fclose(file->output);
         free(file);
@@ -186,6 +188,7 @@ int event_publisher_publish(EventPublisher *publisher, uint64_t timestamp,
     }
 
     memset(&event, 0, sizeof(event));
+    event.sequence = publisher->next_sequence++;
     event.timestamp = timestamp;
     if (bid != NULL) {
         event.bid_present = 1;
@@ -246,5 +249,6 @@ void event_publisher_stats(const EventPublisher *publisher, EventPublisherStats 
     stats->enqueued = publisher->enqueued;
     stats->dropped = publisher->dropped;
     stats->written = publisher->written;
+    stats->next_sequence = publisher->next_sequence;
     stats->write_error = publisher->write_error;
 }

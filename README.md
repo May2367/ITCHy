@@ -50,7 +50,7 @@ Normal mode writes CSV with:
 timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
 ```
 
-`--publish FILE` also sends top-of-book events through a bounded SPSC ring to a publisher thread that writes the same CSV shape. If the ring fills, the hot path drops the event and reports the dropped count on stderr at shutdown.
+`--publish FILE` also sends top-of-book events through a bounded SPSC ring to a publisher thread. Publisher output adds a leading `seq` column before the normal CSV fields. If the ring fills, the hot path drops the event, consumes a sequence number, and reports the dropped count on stderr at shutdown.
 
 Benchmark mode generates deterministic synthetic workloads, runs warmup passes, then reports single-threaded apply performance, a two-thread SPSC producer/consumer comparison, a file-sink publisher comparison, and a matching-engine workload. Environment variables control the run: `ITCHY_BENCH_MESSAGES`, `ITCHY_BENCH_RUNS`, `ITCHY_BENCH_WARMUP_RUNS`, `ITCHY_BENCH_BATCH`, `ITCHY_BENCH_RING`, `ITCHY_MATCH_BENCH_MESSAGES`, and `ITCHY_BENCH_SEED`.
 

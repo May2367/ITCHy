@@ -12,6 +12,7 @@ typedef struct {
     uint64_t enqueued;
     uint64_t dropped;
     uint64_t written;
+    uint64_t next_sequence;
     int write_error;
 } EventPublisherStats;
 
@@ -24,6 +25,7 @@ typedef struct {
     uint64_t enqueued;
     uint64_t dropped;
     uint64_t written;
+    uint64_t next_sequence;
     int write_error;
     int started;
 } EventPublisher;

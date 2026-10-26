@@ -244,7 +244,6 @@ static void test_event_publisher(void)
     Order ask = {.price = 100500, .shares = 70};
     FILE *in;
     char line[256];
-    int lines = 0;
 
     CHECK(event_publisher_start_file(&publisher, path, 8) == 0);
     CHECK(event_publisher_publish(&publisher, 100, &bid, &ask) == 1);
@@ -256,15 +255,21 @@ static void test_event_publisher(void)
     CHECK(stats.enqueued == 3);
     CHECK(stats.dropped == 0);
     CHECK(stats.written == 3);
+    CHECK(stats.next_sequence == 3);
     CHECK(stats.write_error == 0);
 
     in = fopen(path, "r");
     CHECK(in != NULL);
-    while (fgets(line, sizeof(line), in) != NULL) {
-        lines++;
-    }
+    CHECK(fgets(line, sizeof(line), in) != NULL);
+    CHECK(strcmp(line, "seq,timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n") == 0);
+    CHECK(fgets(line, sizeof(line), in) != NULL);
+    CHECK(strncmp(line, "0,100,", 6) == 0);
+    CHECK(fgets(line, sizeof(line), in) != NULL);
+    CHECK(strncmp(line, "1,200,", 6) == 0);
+    CHECK(fgets(line, sizeof(line), in) != NULL);
+    CHECK(strncmp(line, "2,300,", 6) == 0);
+    CHECK(fgets(line, sizeof(line), in) == NULL);
     CHECK(fclose(in) == 0);
-    CHECK(lines == 4);
 }
 
 static void test_utils(void)
@@ -309,6 +314,139 @@ static void test_heap(void)
 static void check_shadow(const OrderBook *book)
 {
     CHECK(orderbook_shadow_best_matches(book));
+}
+
+
+typedef struct {
+    uint64_t id;
+    uint64_t shares;
+    uint32_t price;
+    char side;
+} ModelOrder;
+
+static uint64_t test_rng_next(uint64_t *state)
+{
+    *state = *state * 6364136223846793005ull + 1442695040888963407ull;
+    return *state;
+}
+
+static void model_remove(ModelOrder *orders, size_t *count, size_t index)
+{
+    (*count)--;
+    orders[index] = orders[*count];
+}
+
+static void expected_depth(const ModelOrder *orders, size_t count, char side,
+                           BookLevel *levels, size_t *level_count)
+{
+    *level_count = 0;
+    for (size_t i = 0; i < count; i++) {
+        size_t j;
+        if (orders[i].side != side) {
+            continue;
+        }
+        for (j = 0; j < *level_count; j++) {
+            if (levels[j].price == orders[i].price) {
+                levels[j].shares += orders[i].shares;
+                break;
+            }
+        }
+        if (j == *level_count) {
+            levels[j].price = orders[i].price;
+            levels[j].shares = orders[i].shares;
+            (*level_count)++;
+        }
+    }
+
+    for (size_t i = 1; i < *level_count; i++) {
+        BookLevel key = levels[i];
+        size_t j = i;
+        while (j > 0 && ((side == 'B' && key.price > levels[j - 1].price) ||
+                         (side == 'S' && key.price < levels[j - 1].price))) {
+            levels[j] = levels[j - 1];
+            j--;
+        }
+        levels[j] = key;
+    }
+}
+
+static void check_depth_matches_model(const OrderBook *book, const ModelOrder *orders,
+                                      size_t order_count, char side)
+{
+    BookLevel expected[512];
+    BookLevel actual[5];
+    size_t expected_count;
+    size_t actual_count;
+    size_t compare_count;
+
+    expected_depth(orders, order_count, side, expected, &expected_count);
+    compare_count = expected_count < 5 ? expected_count : 5;
+    actual_count = orderbook_depth(book, side, actual, 5);
+    CHECK(actual_count == compare_count);
+    for (size_t i = 0; i < compare_count; i++) {
+        CHECK(actual[i].price == expected[i].price);
+        CHECK(actual[i].shares == expected[i].shares);
+    }
+}
+
+static void test_orderbook_randomized_depth(void)
+{
+    OrderBook book;
+    ModelOrder orders[512];
+    size_t order_count = 0;
+    uint64_t next_id = 1;
+    uint64_t rng = 7;
+
+    CHECK(orderbook_init(&book) == 0);
+    for (size_t step = 0; step < 300; step++) {
+        uint64_t r = test_rng_next(&rng);
+        if (order_count == 0 || (r % 100) < 55) {
+            ModelOrder order;
+            order.id = next_id++;
+            order.side = (r & 1u) ? 'B' : 'S';
+            order.shares = 1u + (uint32_t)(test_rng_next(&rng) % 200u);
+            order.price = order.side == 'B'
+                ? 99500u + (uint32_t)(test_rng_next(&rng) % 80u) * 10u
+                : 100000u + (uint32_t)(test_rng_next(&rng) % 80u) * 10u;
+            CHECK(orderbook_add(&book, order.id, order.side, (uint32_t)order.shares,
+                                "AMAT", order.price) == 1);
+            orders[order_count++] = order;
+        } else {
+            size_t index = (size_t)(test_rng_next(&rng) % order_count);
+            ModelOrder *order = &orders[index];
+            switch (r % 3) {
+            case 0: {
+                uint32_t shares = 1u + (uint32_t)(test_rng_next(&rng) % order->shares);
+                CHECK(orderbook_cancel(&book, order->id, shares) == 1);
+                if ((uint64_t)shares >= order->shares) {
+                    model_remove(orders, &order_count, index);
+                } else {
+                    order->shares -= shares;
+                }
+                break;
+            }
+            case 1:
+                CHECK(orderbook_delete(&book, order->id) == 1);
+                model_remove(orders, &order_count, index);
+                break;
+            default: {
+                uint64_t old_id = order->id;
+                order->id = next_id++;
+                order->shares = 1u + (uint32_t)(test_rng_next(&rng) % 200u);
+                order->price = order->side == 'B'
+                    ? 99500u + (uint32_t)(test_rng_next(&rng) % 80u) * 10u
+                    : 100000u + (uint32_t)(test_rng_next(&rng) % 80u) * 10u;
+                CHECK(orderbook_replace(&book, old_id, order->id,
+                                        (uint32_t)order->shares, order->price) == 1);
+                break;
+            }
+            }
+        }
+        check_shadow(&book);
+        check_depth_matches_model(&book, orders, order_count, 'B');
+        check_depth_matches_model(&book, orders, order_count, 'S');
+    }
+    orderbook_free(&book);
 }
 
 static void test_orderbook(void)
@@ -451,6 +589,7 @@ static void test_orderbook_state_machine(void)
     OrderBook same_a;
     OrderBook same_b;
     OrderBookSnapshot snapshot = {0};
+    OrderBookSnapshot restored_snapshot = {0};
     MatchReport report;
     BookLevel levels[4];
     uint64_t hash_before;
@@ -490,6 +629,10 @@ static void test_orderbook_state_machine(void)
     CHECK(orderbook_snapshot(&book, &snapshot) == 0);
     CHECK(snapshot.data != NULL && snapshot.size > 0);
     CHECK(orderbook_restore(&restored, &snapshot) == 0);
+    CHECK(orderbook_snapshot(&restored, &restored_snapshot) == 0);
+    CHECK(restored_snapshot.size == snapshot.size);
+    CHECK(memcmp(restored_snapshot.data, snapshot.data, snapshot.size) == 0);
+    orderbook_snapshot_free(&restored_snapshot);
     CHECK(orderbook_state_hash(&restored, &hash_restored) == 0);
     CHECK(hash_before == hash_restored);
     CHECK(orderbook_best_bid(&restored)->price == 100000);
@@ -685,6 +828,7 @@ int main(void)
     test_heap();
     test_orderbook();
     test_orderbook_shadow_sequence();
+    test_orderbook_randomized_depth();
     test_matching_engine();
     test_orderbook_state_machine();
     test_parser_fixture();
