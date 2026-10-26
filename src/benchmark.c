@@ -663,6 +663,23 @@ static void print_stats(FILE *output, const char *name, const BenchStats *stats)
     fprintf(output, "apply_latency_max_ns=%llu\n\n", (unsigned long long)stats->latency_max_ns);
 }
 
+static void print_delta(FILE *output, const char *name, const BenchStats *base,
+                        const BenchStats *other)
+{
+    double throughput_ratio = base->messages_per_second > 0.0
+        ? other->messages_per_second / base->messages_per_second
+        : 0.0;
+
+    fprintf(output, "[%s_vs_single_thread]\n", name);
+    fprintf(output, "throughput_ratio=%.4f\n", throughput_ratio);
+    fprintf(output, "mean_latency_delta_ns=%lld\n",
+            (long long)other->latency_mean_ns - (long long)base->latency_mean_ns);
+    fprintf(output, "p50_latency_delta_ns=%lld\n",
+            (long long)other->latency_p50_ns - (long long)base->latency_p50_ns);
+    fprintf(output, "p99_latency_delta_ns=%lld\n\n",
+            (long long)other->latency_p99_ns - (long long)base->latency_p99_ns);
+}
+
 static int run_measured_passes(const BenchMsg *msgs, BenchmarkResult *result,
                                int threaded, BenchStats *stats)
 {
@@ -734,6 +751,7 @@ static int run_published_measured_passes(const BenchMsg *msgs, BenchmarkResult *
         publisher_totals.enqueued += pass_stats.enqueued;
         publisher_totals.dropped += pass_stats.dropped;
         publisher_totals.written += pass_stats.written;
+        publisher_totals.next_sequence += pass_stats.next_sequence;
         publisher_totals.write_error |= pass_stats.write_error;
     }
 
@@ -804,7 +822,13 @@ int benchmark_run(const Config *config, FILE *output)
     print_stats(output, "publisher_file_sink", &result.published);
     fprintf(output, "publisher_enqueued=%llu\n", (unsigned long long)result.publisher_stats.enqueued);
     fprintf(output, "publisher_dropped=%llu\n", (unsigned long long)result.publisher_stats.dropped);
-    fprintf(output, "publisher_written=%llu\n\n", (unsigned long long)result.publisher_stats.written);
+    fprintf(output, "publisher_written=%llu\n", (unsigned long long)result.publisher_stats.written);
+    fprintf(output, "publisher_drop_rate_pct=%.4f\n\n",
+            result.publisher_stats.next_sequence > 0
+                ? 100.0 * (double)result.publisher_stats.dropped / (double)result.publisher_stats.next_sequence
+                : 0.0);
+    print_delta(output, "spsc_threaded", &result.single, &result.threaded);
+    print_delta(output, "publisher_file_sink", &result.single, &result.published);
     print_stats(output, "matching_engine", &result.matching);
 
     free(matching_msgs);
