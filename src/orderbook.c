@@ -419,6 +419,18 @@ int orderbook_upsert_level(OrderBook *book, uint64_t level_id, char side, uint32
         return orderbook_add(book, level_id, side, shares, stock, price);
     }
 
+    if (order->side == side && order->price == price) {
+        PriceLevel *level = find_level(*levels_for(book, side), price);
+        if (level == NULL || level->shares < order->shares) {
+            return -1;
+        }
+        level->shares = level->shares - order->shares + shares;
+        order->shares = shares;
+        strncpy(order->stock, stock, ITCHY_TICKER_LEN);
+        order->stock[ITCHY_TICKER_LEN] = '\0';
+        return 1;
+    }
+
     remove_level_shares(book, order->side, order->price, order->shares);
     if (order->side != side) {
         heap_remove_at(heap_for(book, order->side), order->heap_index);

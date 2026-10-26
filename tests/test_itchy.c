@@ -642,6 +642,56 @@ static void test_orderbook(void)
     orderbook_free(&book);
 }
 
+static void test_orderbook_upsert_level_replaces_same_price(void)
+{
+    OrderBook book;
+    Order *bid;
+    Order *ask;
+    BookLevel levels[3];
+
+    CHECK(orderbook_init(&book) == 0);
+    CHECK(orderbook_upsert_level(&book, 5001, 'B', 100, "AMAT", 100000) == 1);
+    CHECK(orderbook_upsert_level(&book, 5002, 'B', 50, "AMAT", 100000) == 1);
+    bid = orderbook_best_bid(&book);
+    CHECK(bid != NULL && bid->price == 100000 && bid->shares == 150);
+    CHECK(orderbook_depth(&book, 'B', levels, 3) == 1);
+    CHECK(levels[0].price == 100000 && levels[0].shares == 150);
+    check_shadow(&book);
+
+    CHECK(orderbook_upsert_level(&book, 5001, 'B', 40, "AMAT", 100000) == 1);
+    bid = orderbook_best_bid(&book);
+    CHECK(bid != NULL && bid->price == 100000 && bid->shares == 90);
+    CHECK(orderbook_depth(&book, 'B', levels, 3) == 1);
+    CHECK(levels[0].price == 100000 && levels[0].shares == 90);
+    check_shadow(&book);
+
+    CHECK(orderbook_upsert_level(&book, 5001, 'B', 160, "AMAT", 100000) == 1);
+    bid = orderbook_best_bid(&book);
+    CHECK(bid != NULL && bid->price == 100000 && bid->shares == 210);
+    CHECK(orderbook_depth(&book, 'B', levels, 3) == 1);
+    CHECK(levels[0].price == 100000 && levels[0].shares == 210);
+    check_shadow(&book);
+
+    CHECK(orderbook_upsert_level(&book, 5001, 'B', 160, "AMAT", 100100) == 1);
+    CHECK(orderbook_depth(&book, 'B', levels, 3) == 2);
+    CHECK(levels[0].price == 100100 && levels[0].shares == 160);
+    CHECK(levels[1].price == 100000 && levels[1].shares == 50);
+    check_shadow(&book);
+
+    CHECK(orderbook_upsert_level(&book, 5001, 'S', 25, "AMAT", 100200) == 1);
+    bid = orderbook_best_bid(&book);
+    ask = orderbook_best_ask(&book);
+    CHECK(bid != NULL && bid->price == 100000 && bid->shares == 50);
+    CHECK(ask != NULL && ask->price == 100200 && ask->shares == 25);
+    check_shadow(&book);
+
+    CHECK(orderbook_upsert_level(&book, 5001, 'S', 0, "AMAT", 100200) == 1);
+    CHECK(orderbook_best_ask(&book) == NULL);
+    check_shadow(&book);
+
+    orderbook_free(&book);
+}
+
 static void test_orderbook_shadow_sequence(void)
 {
     OrderBook book;
@@ -1000,6 +1050,7 @@ int main(void)
     test_utils();
     test_heap();
     test_orderbook();
+    test_orderbook_upsert_level_replaces_same_price();
     test_orderbook_shadow_sequence();
     test_orderbook_randomized_depth();
     test_matching_engine();
