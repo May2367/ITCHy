@@ -281,6 +281,21 @@ static void unlink_order(OrderBook *book, Order *order)
     book->order_count--;
 }
 
+static int add_order(OrderBook *book, Order *order)
+{
+    if (heap_insert(heap_for(book, order->side), order) != 0) {
+        return -1;
+    }
+    if (add_level_shares(book, order->side, order->price, order->shares) != 0) {
+        heap_remove_at(heap_for(book, order->side), order->heap_index);
+        return -1;
+    }
+
+    HASH_ADD(hh, book->orders, order_id, sizeof(order->order_id), order);
+    book->order_count++;
+    return 1;
+}
+
 int orderbook_init(OrderBook *book)
 {
     memset(book, 0, sizeof(*book));
@@ -339,18 +354,10 @@ int orderbook_add(OrderBook *book, uint64_t order_id, char side, uint32_t shares
     strncpy(order->stock, stock, ITCHY_TICKER_LEN);
     order->stock[ITCHY_TICKER_LEN] = '\0';
 
-    if (heap_insert(heap_for(book, side), order) != 0) {
+    if (add_order(book, order) != 1) {
         free(order);
         return -1;
     }
-    if (add_level_shares(book, side, price, shares) != 0) {
-        heap_remove_at(heap_for(book, side), order->heap_index);
-        free(order);
-        return -1;
-    }
-
-    HASH_ADD(hh, book->orders, order_id, sizeof(order->order_id), order);
-    book->order_count++;
     return 1;
 }
 
@@ -414,9 +421,26 @@ int orderbook_upsert_level(OrderBook *book, uint64_t level_id, char side, uint32
     if (shares == 0) {
         return order == NULL ? 0 : orderbook_delete(book, level_id);
     }
+    if (side != 'B' && side != 'S') {
+        return 0;
+    }
 
     if (order == NULL) {
-        return orderbook_add(book, level_id, side, shares, stock, price);
+        order = calloc(1, sizeof(*order));
+        if (order == NULL) {
+            return -1;
+        }
+        order->order_id = level_id;
+        order->side = side;
+        order->shares = shares;
+        order->price = price;
+        strncpy(order->stock, stock, ITCHY_TICKER_LEN);
+        order->stock[ITCHY_TICKER_LEN] = '\0';
+        if (add_order(book, order) != 1) {
+            free(order);
+            return -1;
+        }
+        return 1;
     }
 
     if (order->side == side && order->price == price) {
