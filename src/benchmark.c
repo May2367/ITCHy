@@ -81,6 +81,7 @@ typedef struct {
     SpscRing *ring;
     const BenchMsg *msgs;
     size_t count;
+    size_t batch_size;
 } ProducerArgs;
 
 typedef struct {
@@ -442,11 +443,17 @@ static void *producer_main(void *arg)
 {
     ProducerArgs *producer = arg;
     BenchMsg stop = {.op = BENCH_STOP};
+    size_t offset = 0;
 
-    for (size_t i = 0; i < producer->count; i++) {
-        while (!spsc_ring_push(producer->ring, &producer->msgs[i])) {
+    while (offset < producer->count) {
+        size_t remaining = producer->count - offset;
+        size_t limit = remaining < producer->batch_size ? remaining : producer->batch_size;
+        size_t pushed = spsc_ring_push_batch(producer->ring, &producer->msgs[offset], limit);
+        if (pushed == 0) {
             sched_yield();
+            continue;
         }
+        offset += pushed;
     }
     while (!spsc_ring_push(producer->ring, &stop)) {
         sched_yield();
@@ -458,33 +465,40 @@ static void *consumer_main(void *arg)
 {
     ConsumerArgs *consumer = arg;
     OrderBook book;
+    BenchMsg *batch = NULL;
     int done = 0;
 
     if (orderbook_init(&book) != 0) {
         consumer->status = -1;
         return NULL;
     }
+    batch = calloc(consumer->batch_size, sizeof(*batch));
+    if (batch == NULL) {
+        consumer->status = -1;
+        orderbook_free(&book);
+        return NULL;
+    }
 
     while (!done) {
-        size_t applied = 0;
+        size_t popped;
+        size_t applied;
         struct timespec batch_start;
         struct timespec batch_end;
 
         clock_gettime(CLOCK_MONOTONIC, &batch_start);
-        while (applied < consumer->batch_size && !done) {
-            BenchMsg msg;
-            if (!spsc_ring_pop(consumer->ring, &msg)) {
-                if (applied == 0) {
-                    clock_gettime(CLOCK_MONOTONIC, &batch_start);
-                }
-                sched_yield();
-                continue;
-            }
-            if (msg.op == BENCH_STOP) {
+        popped = spsc_ring_pop_batch(consumer->ring, batch, consumer->batch_size);
+        if (popped == 0) {
+            sched_yield();
+            continue;
+        }
+
+        applied = 0;
+        for (size_t i = 0; i < popped; i++) {
+            if (batch[i].op == BENCH_STOP) {
                 done = 1;
                 break;
             }
-            if (apply_msg(&book, &msg) < 0) {
+            if (apply_msg(&book, &batch[i]) < 0) {
                 consumer->status = -1;
                 done = 1;
                 break;
@@ -503,6 +517,7 @@ static void *consumer_main(void *arg)
         }
     }
 
+    free(batch);
     orderbook_free(&book);
     return NULL;
 }
@@ -527,6 +542,7 @@ static int run_threaded_pass(const BenchMsg *msgs, size_t count, size_t batch_si
     producer.ring = &ring;
     producer.msgs = msgs;
     producer.count = count;
+    producer.batch_size = batch_size;
     consumer.ring = &ring;
     consumer.batch_size = batch_size;
     consumer.latencies = latencies;

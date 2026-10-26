@@ -208,8 +208,10 @@ static ParseResult run_fixture(const char *path, const char *ticker, ParserEvent
 static void test_spsc_ring(void)
 {
     SpscRing ring;
+    int values[4];
     int value;
     int out;
+    int out_values[4];
 
     CHECK(spsc_ring_init(&ring, 4, sizeof(value)) == 0);
     CHECK(spsc_ring_count(&ring) == 0);
@@ -231,6 +233,20 @@ static void test_spsc_ring(void)
     CHECK(spsc_ring_pop(&ring, &out) == 1 && out == 30);
     CHECK(spsc_ring_pop(&ring, &out) == 1 && out == 40);
     CHECK(spsc_ring_pop(&ring, &out) == 0);
+
+    values[0] = 50;
+    values[1] = 60;
+    values[2] = 70;
+    values[3] = 80;
+    CHECK(spsc_ring_push_batch(&ring, values, 4) == 3);
+    CHECK(spsc_ring_count(&ring) == 3);
+    CHECK(spsc_ring_pop_batch(&ring, out_values, 2) == 2);
+    CHECK(out_values[0] == 50 && out_values[1] == 60);
+    CHECK(spsc_ring_count(&ring) == 1);
+    CHECK(spsc_ring_push_batch(&ring, values + 3, 1) == 1);
+    CHECK(spsc_ring_pop_batch(&ring, out_values, 4) == 2);
+    CHECK(out_values[0] == 70 && out_values[1] == 80);
+    CHECK(spsc_ring_pop_batch(&ring, out_values, 4) == 0);
 
     spsc_ring_free(&ring);
 }

@@ -60,6 +60,78 @@ int spsc_ring_pop(SpscRing *ring, void *item)
     return 1;
 }
 
+size_t spsc_ring_push_batch(SpscRing *ring, const void *items, size_t count)
+{
+    const unsigned char *src = items;
+    size_t head = atomic_load_explicit(&ring->head, memory_order_relaxed);
+    size_t tail = atomic_load_explicit(&ring->tail, memory_order_acquire);
+    size_t used;
+    size_t available;
+    size_t first;
+    size_t pushed;
+
+    if (count == 0) {
+        return 0;
+    }
+
+    used = head >= tail ? head - tail : ring->capacity - tail + head;
+    available = ring->capacity - used - 1u;
+    if (available == 0) {
+        return 0;
+    }
+
+    pushed = count < available ? count : available;
+    first = ring->capacity - head;
+    if (first > pushed) {
+        first = pushed;
+    }
+
+    memcpy(ring->items + head * ring->item_size, src, first * ring->item_size);
+    if (pushed > first) {
+        memcpy(ring->items, src + first * ring->item_size,
+               (pushed - first) * ring->item_size);
+    }
+
+    atomic_store_explicit(&ring->head, (head + pushed) % ring->capacity,
+                          memory_order_release);
+    return pushed;
+}
+
+size_t spsc_ring_pop_batch(SpscRing *ring, void *items, size_t count)
+{
+    unsigned char *dest = items;
+    size_t tail = atomic_load_explicit(&ring->tail, memory_order_relaxed);
+    size_t head = atomic_load_explicit(&ring->head, memory_order_acquire);
+    size_t available;
+    size_t first;
+    size_t popped;
+
+    if (count == 0) {
+        return 0;
+    }
+
+    available = head >= tail ? head - tail : ring->capacity - tail + head;
+    if (available == 0) {
+        return 0;
+    }
+
+    popped = count < available ? count : available;
+    first = ring->capacity - tail;
+    if (first > popped) {
+        first = popped;
+    }
+
+    memcpy(dest, ring->items + tail * ring->item_size, first * ring->item_size);
+    if (popped > first) {
+        memcpy(dest + first * ring->item_size, ring->items,
+               (popped - first) * ring->item_size);
+    }
+
+    atomic_store_explicit(&ring->tail, (tail + popped) % ring->capacity,
+                          memory_order_release);
+    return popped;
+}
+
 size_t spsc_ring_count(const SpscRing *ring)
 {
     size_t head = atomic_load_explicit(&ring->head, memory_order_acquire);

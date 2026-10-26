@@ -33,7 +33,7 @@ Matching uses price priority first. Within a price level, the current implementa
 
 Phase 3a adds a C11-atomic single-producer/single-consumer ring. The benchmark uses one producer thread to enqueue deterministic decoded messages and one consumer thread to apply them to the book. The same generated message stream is also applied single-threaded so the benchmark can report a direct comparison.
 
-The ring stores fixed-size records and uses atomic head/tail indexes. It is single-producer/single-consumer only; using multiple producers or consumers would require a different queue.
+The ring stores fixed-size records and uses atomic head/tail indexes. It also exposes batch push and pop helpers so the benchmark can amortize atomic index updates across decoded-message groups. It is single-producer/single-consumer only; using multiple producers or consumers would require a different queue.
 
 
 ## Event Publisher
