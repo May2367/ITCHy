@@ -35,6 +35,13 @@ Phase 3a adds a C11-atomic single-producer/single-consumer ring. The benchmark u
 
 The ring stores fixed-size records and uses atomic head/tail indexes. It is single-producer/single-consumer only; using multiple producers or consumers would require a different queue.
 
+
+## Event Publisher
+
+Top-of-book publishing is optional and off the parser callback path. The hot path copies the current best bid/ask into a fixed-size event and tries to push it into a C11-atomic SPSC ring. A publisher thread drains the ring to a CSV file sink.
+
+The queue policy is bounded and nonblocking: if the ring is full, the event is dropped and a counter is incremented. That favors parser latency over guaranteed delivery. Normal parser output still works without the publisher, and benchmark mode reports a `publisher_file_sink` section plus enqueue, write, and drop counts.
+
 ## Sample Aggregate U Records
 
 The sample-specific 34-byte `U` records are represented as synthetic order IDs. They still flow through the same order and price-level update path, so aggregate top-of-book and depth include those updates.
@@ -44,4 +51,4 @@ The sample-specific 34-byte `U` records are represented as synthetic order IDs. 
 - No live feed, packet replay, or DPDK path.
 - Depth is rebuilt on demand instead of maintained as a sorted structure.
 - Snapshot restore is an in-memory API; there is no external snapshot file format or compatibility promise yet.
-- Benchmark mode uses fixed-seed synthetic workloads and reports single-threaded apply, SPSC-threaded apply, and matching-engine throughput plus batched per-message latency.
+- Benchmark mode uses fixed-seed synthetic workloads and reports single-threaded apply, SPSC-threaded apply, publisher file-sink, and matching-engine throughput plus batched per-message latency.

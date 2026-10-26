@@ -19,3 +19,6 @@ jobs:
 
       - name: Run tests
         run: make test
+
+      - name: Run sanitizer tests
+        run: make test-sanitize

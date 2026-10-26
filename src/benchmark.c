@@ -3,6 +3,7 @@
 #include "benchmark.h"
 
 #include "orderbook.h"
+#include "publisher.h"
 #include "spsc_ring.h"
 
 #include <errno.h>
@@ -71,7 +72,9 @@ typedef struct {
     uint64_t seed;
     BenchStats single;
     BenchStats threaded;
+    BenchStats published;
     BenchStats matching;
+    EventPublisherStats publisher_stats;
 } BenchmarkResult;
 
 typedef struct {
@@ -319,6 +322,71 @@ static int run_single_pass(const BenchMsg *msgs, size_t count, size_t batch_size
     *elapsed_out = elapsed_seconds(pass_start, pass_end);
     orderbook_free(&book);
     return 0;
+}
+
+static int run_published_pass(const BenchMsg *msgs, size_t count, size_t batch_size,
+                              size_t ring_capacity, LatencySeries *latencies,
+                              double *elapsed_out, EventPublisherStats *publisher_stats)
+{
+    OrderBook book;
+    EventPublisher publisher;
+    struct timespec pass_start;
+    struct timespec pass_end;
+    int status = 0;
+
+    if (orderbook_init(&book) != 0) {
+        return -1;
+    }
+    if (event_publisher_start(&publisher, "/dev/null", ring_capacity) != 0) {
+        orderbook_free(&book);
+        return -1;
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &pass_start);
+    for (size_t i = 0; i < count;) {
+        size_t end = i + batch_size;
+        struct timespec batch_start;
+        struct timespec batch_end;
+        uint64_t per_message_ns;
+
+        if (end > count) {
+            end = count;
+        }
+
+        clock_gettime(CLOCK_MONOTONIC, &batch_start);
+        for (size_t j = i; j < end; j++) {
+            int rc = apply_msg(&book, &msgs[j]);
+            if (rc < 0) {
+                status = -1;
+                break;
+            }
+            event_publisher_publish(&publisher, (uint64_t)j,
+                                    orderbook_best_bid(&book),
+                                    orderbook_best_ask(&book));
+        }
+        clock_gettime(CLOCK_MONOTONIC, &batch_end);
+        if (status != 0) {
+            break;
+        }
+
+        per_message_ns = elapsed_ns(batch_start, batch_end) / (uint64_t)(end - i);
+        if (latency_append(latencies, per_message_ns) != 0) {
+            status = -1;
+            break;
+        }
+        i = end;
+    }
+    clock_gettime(CLOCK_MONOTONIC, &pass_end);
+
+    if (event_publisher_stop(&publisher) != 0) {
+        status = -1;
+    }
+    if (publisher_stats != NULL) {
+        event_publisher_stats(&publisher, publisher_stats);
+    }
+    *elapsed_out = elapsed_seconds(pass_start, pass_end);
+    orderbook_free(&book);
+    return status;
 }
 
 static int run_matching_pass(const BenchMsg *msgs, size_t count, size_t batch_size,
@@ -638,6 +706,49 @@ static int run_measured_passes(const BenchMsg *msgs, BenchmarkResult *result,
     return status;
 }
 
+static int run_published_measured_passes(const BenchMsg *msgs, BenchmarkResult *result,
+                                         BenchStats *stats)
+{
+    LatencySeries latencies = {0};
+    EventPublisherStats publisher_totals = {0};
+    double warmup_elapsed;
+    int status = 0;
+
+    for (unsigned i = 0; i < result->warmup_runs; i++) {
+        if (run_published_pass(msgs, (size_t)result->messages, result->batch_size,
+                               result->ring_capacity, NULL, &warmup_elapsed, NULL) != 0) {
+            return 1;
+        }
+    }
+
+    for (unsigned i = 0; i < result->runs; i++) {
+        EventPublisherStats pass_stats;
+        double elapsed = 0.0;
+        if (run_published_pass(msgs, (size_t)result->messages, result->batch_size,
+                               result->ring_capacity, &latencies, &elapsed,
+                               &pass_stats) != 0) {
+            status = 1;
+            break;
+        }
+        stats->elapsed_seconds += elapsed;
+        publisher_totals.enqueued += pass_stats.enqueued;
+        publisher_totals.dropped += pass_stats.dropped;
+        publisher_totals.written += pass_stats.written;
+        publisher_totals.write_error |= pass_stats.write_error;
+    }
+
+    if (status == 0) {
+        stats->messages_per_second = stats->elapsed_seconds > 0.0
+            ? ((double)result->messages * (double)result->runs) / stats->elapsed_seconds
+            : 0.0;
+        compute_latency_stats(stats, &latencies);
+        result->publisher_stats = publisher_totals;
+    }
+
+    free(latencies.values);
+    return status;
+}
+
 int benchmark_run(const Config *config, FILE *output)
 {
     BenchmarkResult result = {0};
@@ -671,6 +782,7 @@ int benchmark_run(const Config *config, FILE *output)
 
     status |= run_measured_passes(msgs, &result, 0, &result.single);
     status |= run_measured_passes(msgs, &result, 1, &result.threaded);
+    status |= run_published_measured_passes(msgs, &result, &result.published);
     status |= run_matching_measured_passes(matching_msgs, &result, &result.matching);
 
     fprintf(output, "ITCHy benchmark\n");
@@ -689,6 +801,10 @@ int benchmark_run(const Config *config, FILE *output)
     fprintf(output, "commit=%s\n\n", ITCHY_GIT_COMMIT);
     print_stats(output, "single_thread", &result.single);
     print_stats(output, "spsc_threaded", &result.threaded);
+    print_stats(output, "publisher_file_sink", &result.published);
+    fprintf(output, "publisher_enqueued=%llu\n", (unsigned long long)result.publisher_stats.enqueued);
+    fprintf(output, "publisher_dropped=%llu\n", (unsigned long long)result.publisher_stats.dropped);
+    fprintf(output, "publisher_written=%llu\n\n", (unsigned long long)result.publisher_stats.written);
     print_stats(output, "matching_engine", &result.matching);
 
     free(matching_msgs);

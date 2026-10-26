@@ -2,7 +2,7 @@
 
 ITCHy is an offline parser and order book engine for a gzip-compressed, length-prefixed ITCH-style feed. It reads records from a file, applies supported book updates, and can emit top-of-book CSV rows or run the built-in benchmark mode.
 
-It is not a live market data gateway. It does not use DPDK, packet replay, sockets, or Kafka. The parser path applies feed updates offline; the matching engine is an opt-in API for synthetic crossing orders.
+It is not a live market data gateway. It does not use DPDK, packet replay, sockets, or Kafka. The parser path applies feed updates offline; the matching engine is an opt-in API for synthetic crossing orders. An optional publisher thread can drain top-of-book events to a CSV file sink.
 
 ## Build
 
@@ -20,6 +20,12 @@ make test
 make test-sanitize
 ```
 
+Build the Docker image if you want a clean Debian build environment:
+
+```sh
+docker build -t itchy .
+```
+
 Run the small benchmark smoke target:
 
 ```sh
@@ -35,7 +41,7 @@ Benchmark mode uses a fixed-seed synthetic apply workload. The positional input 
 ## Usage
 
 ```sh
-./itchy input.gz [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--benchmark]
+./itchy input.gz [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--benchmark]
 ```
 
 Normal mode writes CSV with:
@@ -44,7 +50,9 @@ Normal mode writes CSV with:
 timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
 ```
 
-Benchmark mode generates deterministic synthetic workloads, runs warmup passes, then reports single-threaded apply performance, a two-thread SPSC producer/consumer comparison, and a matching-engine workload. Environment variables control the run: `ITCHY_BENCH_MESSAGES`, `ITCHY_BENCH_RUNS`, `ITCHY_BENCH_WARMUP_RUNS`, `ITCHY_BENCH_BATCH`, `ITCHY_BENCH_RING`, `ITCHY_MATCH_BENCH_MESSAGES`, and `ITCHY_BENCH_SEED`.
+`--publish FILE` also sends top-of-book events through a bounded SPSC ring to a publisher thread that writes the same CSV shape. If the ring fills, the hot path drops the event and reports the dropped count on stderr at shutdown.
+
+Benchmark mode generates deterministic synthetic workloads, runs warmup passes, then reports single-threaded apply performance, a two-thread SPSC producer/consumer comparison, a file-sink publisher comparison, and a matching-engine workload. Environment variables control the run: `ITCHY_BENCH_MESSAGES`, `ITCHY_BENCH_RUNS`, `ITCHY_BENCH_WARMUP_RUNS`, `ITCHY_BENCH_BATCH`, `ITCHY_BENCH_RING`, `ITCHY_MATCH_BENCH_MESSAGES`, and `ITCHY_BENCH_SEED`.
 
 ## Input Format
 
@@ -61,7 +69,7 @@ The sample feed this project was built around contains non-standard 34-byte `U` 
 
 ## Current Book Model
 
-The current book keeps an order-ID hash table for order updates and aggregated price levels per side. Best bid/ask queries use bid/ask price-level heaps, and `orderbook_depth()` returns sorted top-N levels. The old per-order heaps remain internally as a shadow check during the price-level transition. `orderbook_apply()` is the decoded-message state-machine entry point; snapshots, restore, and `orderbook_state_hash()` support deterministic replay checks. `orderbook_match_limit()` provides simple price-time matching for crossing limit orders without changing normal parser behavior.
+The current book keeps an order-ID hash table for order updates and aggregated price levels per side. Best bid/ask queries use bid/ask price-level heaps, and `orderbook_depth()` returns sorted top-N levels. The old per-order heaps remain internally as a shadow check during the price-level transition. `orderbook_apply()` is the decoded-message state-machine entry point; snapshots, restore, and `orderbook_state_hash()` support deterministic replay checks. `orderbook_match_limit()` provides simple price-time matching for crossing limit orders without changing normal parser behavior. The optional publisher path keeps file writes off the parser callback path by enqueueing top-of-book events into a bounded SPSC ring.
 
 See [docs/design.md](docs/design.md) for the current design notes and known limitations.
 

@@ -1,6 +1,7 @@
 #include "heap.h"
 #include "orderbook.h"
 #include "parser.h"
+#include "publisher.h"
 #include "spsc_ring.h"
 #include "types.h"
 #include "utils.h"
@@ -232,6 +233,38 @@ static void test_spsc_ring(void)
     CHECK(spsc_ring_pop(&ring, &out) == 0);
 
     spsc_ring_free(&ring);
+}
+
+static void test_event_publisher(void)
+{
+    const char *path = "tests/tmp_events.csv";
+    EventPublisher publisher;
+    EventPublisherStats stats;
+    Order bid = {.price = 100000, .shares = 50};
+    Order ask = {.price = 100500, .shares = 70};
+    FILE *in;
+    char line[256];
+    int lines = 0;
+
+    CHECK(event_publisher_start(&publisher, path, 8) == 0);
+    CHECK(event_publisher_publish(&publisher, 100, &bid, &ask) == 1);
+    CHECK(event_publisher_publish(&publisher, 200, &bid, NULL) == 1);
+    CHECK(event_publisher_publish(&publisher, 300, NULL, &ask) == 1);
+    CHECK(event_publisher_stop(&publisher) == 0);
+
+    event_publisher_stats(&publisher, &stats);
+    CHECK(stats.enqueued == 3);
+    CHECK(stats.dropped == 0);
+    CHECK(stats.written == 3);
+    CHECK(stats.write_error == 0);
+
+    in = fopen(path, "r");
+    CHECK(in != NULL);
+    while (fgets(line, sizeof(line), in) != NULL) {
+        lines++;
+    }
+    CHECK(fclose(in) == 0);
+    CHECK(lines == 4);
 }
 
 static void test_utils(void)
@@ -647,6 +680,7 @@ static void test_parser_bad_records(void)
 int main(void)
 {
     test_spsc_ring();
+    test_event_publisher();
     test_utils();
     test_heap();
     test_orderbook();

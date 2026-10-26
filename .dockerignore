@@ -1,0 +1,10 @@
+.git
+build
+itchy
+data/*
+!data/README.md
+!data/.gitkeep
+tests/tmp_parser_*.gz
+tests/tmp_events.csv
+scripts/fabric/vm_link_test/.build
+scripts/fabric/vm_link_test/results

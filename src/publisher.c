@@ -1,0 +1,173 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include "publisher.h"
+
+#include "utils.h"
+
+#include <sched.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef struct {
+    uint64_t timestamp;
+    uint64_t bid_shares;
+    uint64_t ask_shares;
+    uint32_t bid_price;
+    uint32_t ask_price;
+    unsigned bid_present;
+    unsigned ask_present;
+    unsigned stop;
+} BookEvent;
+
+static void write_event(FILE *output, const BookEvent *event)
+{
+    char bid_price[32] = "";
+    char ask_price[32] = "";
+    char spread[32] = "";
+
+    if (event->bid_present) {
+        format_price(bid_price, sizeof(bid_price), event->bid_price);
+    }
+    if (event->ask_present) {
+        format_price(ask_price, sizeof(ask_price), event->ask_price);
+    }
+    if (event->bid_present && event->ask_present && event->ask_price >= event->bid_price) {
+        format_price(spread, sizeof(spread), event->ask_price - event->bid_price);
+    }
+
+    fprintf(output, "%llu,%s,%llu,%s,%llu,%s\n",
+            (unsigned long long)event->timestamp,
+            bid_price, (unsigned long long)event->bid_shares,
+            ask_price, (unsigned long long)event->ask_shares,
+            spread);
+}
+
+static void *publisher_main(void *arg)
+{
+    EventPublisher *publisher = arg;
+    int done = 0;
+
+    fprintf(publisher->output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
+    while (!done) {
+        BookEvent event;
+        if (!spsc_ring_pop(&publisher->ring, &event)) {
+            sched_yield();
+            continue;
+        }
+        if (event.stop) {
+            done = 1;
+            continue;
+        }
+
+        write_event(publisher->output, &event);
+        if (ferror(publisher->output)) {
+            publisher->write_error = 1;
+            done = 1;
+        } else {
+            publisher->written++;
+        }
+    }
+
+    if (fflush(publisher->output) != 0) {
+        publisher->write_error = 1;
+    }
+    return NULL;
+}
+
+int event_publisher_start(EventPublisher *publisher, const char *path, size_t capacity)
+{
+    memset(publisher, 0, sizeof(*publisher));
+    if (path == NULL || capacity < 2) {
+        return -1;
+    }
+
+    publisher->output = fopen(path, "w");
+    if (publisher->output == NULL) {
+        return -1;
+    }
+    if (spsc_ring_init(&publisher->ring, capacity, sizeof(BookEvent)) != 0) {
+        fclose(publisher->output);
+        publisher->output = NULL;
+        return -1;
+    }
+    if (pthread_create(&publisher->thread, NULL, publisher_main, publisher) != 0) {
+        spsc_ring_free(&publisher->ring);
+        fclose(publisher->output);
+        publisher->output = NULL;
+        return -1;
+    }
+
+    publisher->started = 1;
+    return 0;
+}
+
+int event_publisher_publish(EventPublisher *publisher, uint64_t timestamp,
+                            const Order *bid, const Order *ask)
+{
+    BookEvent event;
+
+    if (publisher == NULL || !publisher->started) {
+        return 0;
+    }
+
+    memset(&event, 0, sizeof(event));
+    event.timestamp = timestamp;
+    if (bid != NULL) {
+        event.bid_present = 1;
+        event.bid_price = bid->price;
+        event.bid_shares = bid->shares;
+    }
+    if (ask != NULL) {
+        event.ask_present = 1;
+        event.ask_price = ask->price;
+        event.ask_shares = ask->shares;
+    }
+
+    if (!spsc_ring_push(&publisher->ring, &event)) {
+        publisher->dropped++;
+        return 0;
+    }
+    publisher->enqueued++;
+    return 1;
+}
+
+int event_publisher_stop(EventPublisher *publisher)
+{
+    BookEvent stop = {0};
+    int status;
+
+    if (publisher == NULL || !publisher->started) {
+        return 0;
+    }
+
+    stop.stop = 1;
+    while (!spsc_ring_push(&publisher->ring, &stop)) {
+        sched_yield();
+    }
+
+    pthread_join(publisher->thread, NULL);
+    status = publisher->write_error ? -1 : 0;
+    spsc_ring_free(&publisher->ring);
+    if (fclose(publisher->output) != 0) {
+        status = -1;
+    }
+    publisher->output = NULL;
+    publisher->started = 0;
+    return status;
+}
+
+void event_publisher_stats(const EventPublisher *publisher, EventPublisherStats *stats)
+{
+    if (stats == NULL) {
+        return;
+    }
+    memset(stats, 0, sizeof(*stats));
+    if (publisher == NULL) {
+        return;
+    }
+    stats->enqueued = publisher->enqueued;
+    stats->dropped = publisher->dropped;
+    stats->written = publisher->written;
+    stats->write_error = publisher->write_error;
+}

@@ -1,5 +1,6 @@
 #include "benchmark.h"
 #include "parser.h"
+#include "publisher.h"
 #include "types.h"
 #include "utils.h"
 
@@ -15,6 +16,11 @@ typedef struct {
     uint64_t interval_ns;
     uint64_t next_emit;
 } CsvEmitter;
+
+typedef struct {
+    CsvEmitter emitter;
+    EventPublisher *publisher;
+} BookCallbacks;
 
 static void emit_spread(uint64_t timestamp, const Order *bid, const Order *ask,
                         void *user_data)
@@ -47,10 +53,22 @@ static void emit_spread(uint64_t timestamp, const Order *bid, const Order *ask,
     emitter->next_emit = timestamp + emitter->interval_ns;
 }
 
+static void on_book_update(uint64_t timestamp, const Order *bid, const Order *ask,
+                           void *user_data)
+{
+    BookCallbacks *callbacks = user_data;
+
+    if (callbacks == NULL) {
+        return;
+    }
+    emit_spread(timestamp, bid, ask, &callbacks->emitter);
+    event_publisher_publish(callbacks->publisher, timestamp, bid, ask);
+}
+
 static void usage(const char *program)
 {
     fprintf(stderr,
-            "usage: %s <input.gz> [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--benchmark]\n",
+            "usage: %s <input.gz> [--ticker SYMBOL] [--output FILE] [--interval-ns N] [--publish FILE] [--publish-ring N] [--benchmark]\n",
             program);
 }
 
@@ -58,6 +76,7 @@ static int parse_args(int argc, char **argv, Config *config)
 {
     memset(config, 0, sizeof(*config));
     config->update_interval_ns = 1000000000ull;
+    config->publish_ring_capacity = 4096;
     config->run_mode = RUN_MODE_NORMAL;
 
     if (argc < 2) {
@@ -78,6 +97,15 @@ static int parse_args(int argc, char **argv, Config *config)
             if (errno != 0 || end == argv[i] || *end != '\0') {
                 return -1;
             }
+        } else if (strcmp(argv[i], "--publish") == 0 && i + 1 < argc) {
+            config->publish_path = argv[++i];
+        } else if (strcmp(argv[i], "--publish-ring") == 0 && i + 1 < argc) {
+            char *end = NULL;
+            errno = 0;
+            config->publish_ring_capacity = strtoull(argv[++i], &end, 10);
+            if (errno != 0 || end == argv[i] || *end != '\0' || config->publish_ring_capacity < 2) {
+                return -1;
+            }
         } else if (strcmp(argv[i], "--benchmark") == 0) {
             config->run_mode = RUN_MODE_BENCHMARK;
         } else {
@@ -93,6 +121,8 @@ int main(int argc, char **argv)
     Config config;
     FILE *output = stdout;
     gzFile input = NULL;
+    EventPublisher publisher;
+    int publisher_started = 0;
     int status = 0;
 
     if (parse_args(argc, argv, &config) != 0) {
@@ -112,8 +142,19 @@ int main(int argc, char **argv)
         status = benchmark_run(&config, output);
     } else {
         ParserRunOptions options = {0};
-        CsvEmitter emitter = {output, config.update_interval_ns, 0};
+        BookCallbacks callbacks = {{output, config.update_interval_ns, 0}, NULL};
         ParseResult result;
+
+        if (config.publish_path != NULL) {
+            if (event_publisher_start(&publisher, config.publish_path,
+                                      (size_t)config.publish_ring_capacity) != 0) {
+                perror(config.publish_path);
+                status = 1;
+                goto cleanup;
+            }
+            publisher_started = 1;
+            callbacks.publisher = &publisher;
+        }
 
         input = gzopen(config.input_path, "rb");
         if (input == NULL) {
@@ -123,13 +164,26 @@ int main(int argc, char **argv)
         }
 
         fprintf(output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
-        options.book_callback = emit_spread;
-        options.book_user_data = &emitter;
+        options.book_callback = on_book_update;
+        options.book_user_data = &callbacks;
         result = parser_run_stream(input, &config, &options);
         if (gzclose(input) != Z_OK && result.io_error == 0) {
             result.io_error = EIO;
         }
         input = NULL;
+
+        if (publisher_started) {
+            EventPublisherStats stats;
+            if (event_publisher_stop(&publisher) != 0 && result.io_error == 0) {
+                result.io_error = EIO;
+            }
+            publisher_started = 0;
+            event_publisher_stats(&publisher, &stats);
+            fprintf(stderr, "published=%llu dropped=%llu written=%llu\n",
+                    (unsigned long long)stats.enqueued,
+                    (unsigned long long)stats.dropped,
+                    (unsigned long long)stats.written);
+        }
 
         fprintf(stderr, "messages_read=%llu applied=%llu ignored=%llu unknown=%llu malformed=%llu\n",
                 (unsigned long long)result.messages_read,
@@ -144,6 +198,12 @@ int main(int argc, char **argv)
     }
 
 cleanup:
+    if (publisher_started) {
+        if (event_publisher_stop(&publisher) != 0) {
+            status = 1;
+        }
+    }
+
     if (input != NULL) {
         gzclose(input);
     }

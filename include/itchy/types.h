@@ -15,8 +15,10 @@ typedef enum {
 typedef struct {
     const char *input_path;
     const char *output_path;
+    const char *publish_path;
     char ticker[ITCHY_TICKER_LEN + 1];
     uint64_t update_interval_ns;
+    uint64_t publish_ring_capacity;
     RunMode run_mode;
 } Config;
 
