@@ -1,0 +1,20 @@
+# build outputs
+/itchy
+/build/
+*.o
+
+# generated test fixtures
+/tests/tmp_parser_*.gz
+
+# data files
+/data/*
+!/data/.gitkeep
+!/data/README.md
+
+# FABRIC run outputs
+/scripts/fabric/vm_link_test/.build/
+/scripts/fabric/vm_link_test/results/
+
+# editor/notebook noise
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
