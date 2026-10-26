@@ -274,8 +274,10 @@ int main(int argc, char **argv)
         options.max_messages = config.max_messages;
         options.book_callback = on_book_update;
         options.book_user_data = &callbacks;
-        options.applied_message_callback = on_applied_message;
-        options.applied_message_user_data = &callbacks;
+        if (callbacks.event_log != NULL) {
+            options.applied_message_callback = on_applied_message;
+            options.applied_message_user_data = &callbacks;
+        }
         if (config.progress_interval > 0) {
             options.message_callback = on_parse_message;
             options.message_user_data = &progress;
