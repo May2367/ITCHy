@@ -43,6 +43,27 @@ static uint64_t fnv1a64(const unsigned char *data, size_t len)
     return h;
 }
 
+static int raw_ticker_matches(const char *filter, const unsigned char *raw)
+{
+    size_t i;
+
+    for (i = 0; i < ITCHY_TICKER_LEN && filter[i] != '\0'; i++) {
+        if ((unsigned char)filter[i] != raw[i]) {
+            return 0;
+        }
+    }
+    if (i == ITCHY_TICKER_LEN) {
+        return filter[i] == '\0';
+    }
+    while (i < ITCHY_TICKER_LEN) {
+        if (raw[i] != ' ') {
+            return 0;
+        }
+        i++;
+    }
+    return 1;
+}
+
 static int set_timestamp(const unsigned char *msg, size_t len, size_t no_tracking_len,
                          uint64_t *timestamp, Layout *layout)
 {
@@ -65,10 +86,10 @@ static int parse_add(const unsigned char *msg, size_t len, const Config *config,
     }
 
     p = msg + layout.payload_offset;
-    copy_itch_string(stock, sizeof(stock), p + 13, ITCHY_TICKER_LEN);
-    if (!ticker_matches(config->ticker, stock)) {
+    if (config->ticker[0] != '\0' && !raw_ticker_matches(config->ticker, p + 13)) {
         return 0;
     }
+    copy_itch_string(stock, sizeof(stock), p + 13, ITCHY_TICKER_LEN);
 
     memset(decoded, 0, sizeof(*decoded));
     decoded->type = ORDERBOOK_MSG_ADD;
@@ -173,7 +194,6 @@ static int parse_trade_or_cross(const unsigned char *msg, size_t len, const Conf
                                 uint64_t *timestamp)
 {
     Layout layout;
-    char stock[ITCHY_TICKER_LEN + 1];
     const unsigned char *p;
 
     if (msg[0] == 'P') {
@@ -181,16 +201,14 @@ static int parse_trade_or_cross(const unsigned char *msg, size_t len, const Conf
             return 0;
         }
         p = msg + layout.payload_offset;
-        copy_itch_string(stock, sizeof(stock), p + 13, ITCHY_TICKER_LEN);
-        return ticker_matches(config->ticker, stock) ? 1 : 0;
+        return config->ticker[0] == '\0' || raw_ticker_matches(config->ticker, p + 13) ? 1 : 0;
     }
 
     if (!set_timestamp(msg, len, 38, timestamp, &layout)) {
         return 0;
     }
     p = msg + layout.payload_offset;
-    copy_itch_string(stock, sizeof(stock), p + 8, ITCHY_TICKER_LEN);
-    return ticker_matches(config->ticker, stock) ? 1 : 0;
+    return config->ticker[0] == '\0' || raw_ticker_matches(config->ticker, p + 8) ? 1 : 0;
 }
 
 static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config *config,
@@ -210,12 +228,13 @@ static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config
     *timestamp = read_uint48_be(msg + 3);
     side = (char)msg[9];
     shares = read_uint32_be(msg + 10);
-    copy_itch_string(stock, sizeof(stock), msg + 18, ITCHY_TICKER_LEN);
     price = read_uint32_be(msg + 26);
 
-    if ((side != 'B' && side != 'S') || !ticker_matches(config->ticker, stock)) {
+    if ((side != 'B' && side != 'S') ||
+        (config->ticker[0] != '\0' && !raw_ticker_matches(config->ticker, msg + 18))) {
         return 0;
     }
+    copy_itch_string(stock, sizeof(stock), msg + 18, ITCHY_TICKER_LEN);
 
     key[0] = (unsigned char)side;
     memcpy(key + 1, msg + 18, ITCHY_TICKER_LEN);

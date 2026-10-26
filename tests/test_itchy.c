@@ -969,6 +969,43 @@ static void test_parser_standard_itch_messages(void)
     CHECK(events.last_ask_shares == 25);
 }
 
+static void test_parser_ticker_filter_exact_raw_match(void)
+{
+    const char *path = "tests/tmp_parser_ticker_filter.gz";
+    ParserEvents events = {0};
+    ParseResult result;
+    gzFile out;
+    unsigned char msg[64];
+
+    out = gzopen(path, "wb");
+    CHECK(out != NULL);
+    make_add(msg, 100, 1001, 'B', 100, "AMAT", 100000);
+    write_record(out, msg, 34);
+    make_add(msg, 110, 1002, 'B', 100, "AMA", 100100);
+    write_record(out, msg, 34);
+    make_tvagg_u(msg, 120, 'S', 70, "AMATX", 100500);
+    write_record(out, msg, 34);
+    make_tvagg_u(msg, 130, 'S', 80, "AMAT", 100400);
+    write_record(out, msg, 34);
+    CHECK(gzclose(out) == Z_OK);
+
+    result = run_fixture(path, "AMAT", &events);
+
+    CHECK(result.io_error == 0);
+    CHECK(result.messages_read == 4);
+    CHECK(result.messages_applied == 2);
+    CHECK(result.messages_ignored == 2);
+    CHECK(result.unknown_messages == 0);
+    CHECK(result.malformed_messages == 0);
+    CHECK(events.callbacks == 2);
+    CHECK(events.applied_callbacks == 2);
+    CHECK(events.last_message_type == ORDERBOOK_MSG_UPSERT_LEVEL);
+    CHECK(events.last_bid_price == 100000);
+    CHECK(events.last_bid_shares == 100);
+    CHECK(events.last_ask_price == 100400);
+    CHECK(events.last_ask_shares == 80);
+}
+
 static void test_parser_aggregate_u_edges(void)
 {
     const char *path = "tests/tmp_parser_tvagg_edges.gz";
@@ -1058,6 +1095,7 @@ int main(void)
     test_parser_fixture();
     test_parser_max_messages();
     test_parser_standard_itch_messages();
+    test_parser_ticker_filter_exact_raw_match();
     test_parser_aggregate_u_edges();
     test_parser_bad_records();
     puts("all tests passed");

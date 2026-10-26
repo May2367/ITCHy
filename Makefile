@@ -25,6 +25,7 @@ SAN_LDFLAGS := -fsanitize=address,undefined
 TMP_FIXTURES := tests/tmp_parser_fixture.gz \
 	tests/tmp_parser_standard.gz \
 	tests/tmp_parser_tvagg_edges.gz \
+	tests/tmp_parser_ticker_filter.gz \
 	tests/tmp_parser_bad_len.gz \
 	tests/tmp_parser_truncated.gz \
 	tests/tmp_events.csv \
