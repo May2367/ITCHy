@@ -2,9 +2,13 @@
 /itchy
 /build/
 *.o
+gmon.out
 
 # generated test fixtures
 /tests/tmp_parser_*.gz
+/tests/tmp_events.csv
+/tests/tmp_event_log.csv
+/tests/tmp_event_log_bad.csv
 
 # data files
 /data/*
