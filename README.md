@@ -26,6 +26,12 @@ Build the Docker image if you want a clean Debian build environment:
 docker build -t itchy .
 ```
 
+Run the parser fuzz smoke target with clang/libFuzzer and sanitizers:
+
+```sh
+make fuzz-parser-smoke
+```
+
 Run the small benchmark smoke target:
 
 ```sh

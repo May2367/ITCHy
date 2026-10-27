@@ -22,6 +22,11 @@ SAN_OBJS := $(patsubst %.c,$(SAN_DIR)/%.o,$(TEST_SRCS))
 SAN_CFLAGS := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer -Wall -Wextra -std=c11
 SAN_LDFLAGS := -fsanitize=address,undefined
 
+FUZZ_CC ?= clang
+FUZZ_TARGET := $(BUILD_DIR)/fuzz_parser
+FUZZ_SRCS := tests/fuzz_parser.c src/parser.c src/orderbook.c src/utils.c
+FUZZ_CFLAGS := -O1 -g -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer -Wall -Wextra -std=c11
+
 TMP_FIXTURES := tests/tmp_parser_fixture.gz \
 	tests/tmp_parser_standard.gz \
 	tests/tmp_parser_tvagg_edges.gz \
@@ -32,7 +37,7 @@ TMP_FIXTURES := tests/tmp_parser_fixture.gz \
 	tests/tmp_event_log.csv \
 	tests/tmp_event_log_bad.csv
 
-.PHONY: all build test bench test-sanitize clean
+.PHONY: all build test bench test-sanitize fuzz-parser fuzz-parser-smoke clean
 
 all: build
 
@@ -73,6 +78,15 @@ bench: build
 
 test-sanitize: $(SAN_TARGET)
 	./$(SAN_TARGET)
+
+fuzz-parser: $(FUZZ_TARGET)
+
+$(FUZZ_TARGET): $(FUZZ_SRCS)
+	mkdir -p $(dir $@)
+	$(FUZZ_CC) $(CPPFLAGS) $(FUZZ_CFLAGS) -o $@ $(FUZZ_SRCS) $(LDLIBS)
+
+fuzz-parser-smoke: $(FUZZ_TARGET)
+	./$(FUZZ_TARGET) -runs=100 -max_len=2048
 
 clean:
 	rm -rf $(BUILD_DIR) $(TARGET) $(TMP_FIXTURES)
