@@ -40,6 +40,11 @@ static double elapsed_seconds(struct timespec start, struct timespec end)
            (double)(end.tv_nsec - start.tv_nsec) / 1000000000.0;
 }
 
+static int output_discards_rows(const Config *config)
+{
+    return config->output_path != NULL && strcmp(config->output_path, "/dev/null") == 0;
+}
+
 static void emit_spread(uint64_t timestamp, const Order *bid, const Order *ask,
                         void *user_data)
 {
@@ -243,6 +248,7 @@ int main(int argc, char **argv)
         BookCallbacks callbacks = {{output, config.update_interval_ns, 0}, NULL, NULL};
         ParseResult result;
         ParseProgress progress = {config.progress_interval, 0, 0, {0, 0}};
+        int emit_book_updates = !output_discards_rows(&config);
         struct timespec parse_start;
         struct timespec parse_end;
         double parse_elapsed;
@@ -266,6 +272,7 @@ int main(int argc, char **argv)
             }
             publisher_started = 1;
             callbacks.publisher = &publisher;
+            emit_book_updates = 1;
         }
 
         input = gzopen(config.input_path, "rb");
@@ -275,10 +282,12 @@ int main(int argc, char **argv)
             goto cleanup;
         }
 
-        fprintf(output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
+        if (emit_book_updates) {
+            fprintf(output, "timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread\n");
+            options.book_callback = on_book_update;
+            options.book_user_data = &callbacks;
+        }
         options.max_messages = config.max_messages;
-        options.book_callback = on_book_update;
-        options.book_user_data = &callbacks;
         if (callbacks.event_log != NULL) {
             options.applied_message_callback = on_applied_message;
             options.applied_message_user_data = &callbacks;
