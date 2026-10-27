@@ -133,7 +133,7 @@ static int parse_args(int argc, char **argv, Config *config)
 {
     memset(config, 0, sizeof(*config));
     config->update_interval_ns = 1000000000ull;
-    config->publish_ring_capacity = 4096;
+    config->publish_ring_capacity = 262144;
     config->run_mode = RUN_MODE_NORMAL;
 
     if (argc < 2) {

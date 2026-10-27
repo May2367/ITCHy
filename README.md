@@ -58,7 +58,7 @@ Normal parse mode requires `--ticker SYMBOL`; it writes CSV for that single-symb
 timestamp_ns,best_bid,bid_shares,best_ask,ask_shares,spread
 ```
 
-`--publish FILE` also sends top-of-book events through a bounded SPSC ring to a publisher thread. Publisher output adds a leading `seq` column before the normal CSV fields. If the ring fills, the hot path drops the event, consumes a sequence number, and reports the dropped count on stderr at shutdown.
+`--publish FILE` also sends top-of-book events through a bounded SPSC ring to a publisher thread. The default publisher ring capacity is 262144 events and can be changed with `--publish-ring N`. Publisher output adds a leading `seq` column before the normal CSV fields. If the ring fills, the hot path drops the event, consumes a sequence number, and reports the dropped count on stderr at shutdown.
 
 `--event-log FILE` writes the decoded applied order-book messages with a sequence number and post-apply state hash. `--replay` reads that log, reapplies each message, checks sequence continuity, and compares the stored hash after every event. This is a local deterministic replay check; it is separate from the top-of-book publisher CSV and does not require Kafka.
 

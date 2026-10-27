@@ -795,7 +795,7 @@ int benchmark_run(const Config *config, FILE *output)
     result.runs = (unsigned)env_u64("ITCHY_BENCH_RUNS", 5ull);
     result.warmup_runs = (unsigned)env_u64("ITCHY_BENCH_WARMUP_RUNS", 1ull);
     result.batch_size = (unsigned)env_u64("ITCHY_BENCH_BATCH", 64ull);
-    result.ring_capacity = (unsigned)env_u64("ITCHY_BENCH_RING", 4096ull);
+    result.ring_capacity = (unsigned)env_u64("ITCHY_BENCH_RING", 262144ull);
     result.seed = env_u64("ITCHY_BENCH_SEED", 1ull);
 
     if (result.messages == 0 || result.runs == 0 || result.batch_size == 0 ||
