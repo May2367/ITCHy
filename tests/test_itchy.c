@@ -1,4 +1,3 @@
-#include "heap.h"
 #include "orderbook.h"
 #include "parser.h"
 #include "publisher.h"
@@ -429,31 +428,6 @@ static void test_utils(void)
     CHECK(strcmp(price, "123.4567") == 0);
 }
 
-static void test_heap(void)
-{
-    Heap heap;
-    Order a = {.order_id = 1, .price = 100};
-    Order b = {.order_id = 2, .price = 105};
-    Order c = {.order_id = 3, .price = 101};
-
-    CHECK(heap_init(&heap, HEAP_MAX) == 0);
-    CHECK(heap_insert(&heap, &a) == 0);
-    CHECK(heap_insert(&heap, &b) == 0);
-    CHECK(heap_insert(&heap, &c) == 0);
-    CHECK(heap_peek(&heap) == &b);
-    heap_remove_at(&heap, b.heap_index);
-    CHECK(heap_peek(&heap) == &c);
-    c.price = 99;
-    heap_fix_at(&heap, c.heap_index);
-    CHECK(heap_peek(&heap) == &a);
-    heap_free(&heap);
-}
-
-static void check_shadow(const OrderBook *book)
-{
-    CHECK(orderbook_shadow_best_matches(book));
-}
-
 
 typedef struct {
     uint64_t id;
@@ -580,7 +554,6 @@ static void test_orderbook_randomized_depth(void)
             }
             }
         }
-        check_shadow(&book);
         check_depth_matches_model(&book, orders, order_count, 'B');
         check_depth_matches_model(&book, orders, order_count, 'S');
     }
@@ -596,13 +569,10 @@ static void test_orderbook(void)
 
     CHECK(orderbook_init(&book) == 0);
     CHECK(orderbook_add(&book, 1001, 'B', 100, "AMAT", 100000) == 1);
-    check_shadow(&book);
     CHECK(orderbook_add(&book, 1002, 'B', 60, "AMAT", 100000) == 1);
-    check_shadow(&book);
     CHECK(orderbook_add(&book, 1003, 'B', 30, "AMAT", 99900) == 1);
     CHECK(orderbook_add(&book, 2001, 'S', 50, "AMAT", 100500) == 1);
     CHECK(orderbook_add(&book, 2002, 'S', 80, "AMAT", 100400) == 1);
-    check_shadow(&book);
 
     bid = orderbook_best_bid(&book);
     ask = orderbook_best_ask(&book);
@@ -620,7 +590,6 @@ static void test_orderbook(void)
     CHECK(orderbook_best_bid(&book)->shares == 135);
     CHECK(orderbook_cancel(&book, 1002, 60) == 1);
     CHECK(orderbook_best_bid(&book)->shares == 75);
-    check_shadow(&book);
 
     CHECK(orderbook_replace(&book, 2001, 3001, 20, 100300) == 1);
     CHECK(orderbook_best_ask(&book)->price == 100300);
@@ -629,7 +598,6 @@ static void test_orderbook(void)
     CHECK(orderbook_depth(&book, 'S', levels, 2) == 2);
     CHECK(levels[0].price == 100300 && levels[0].shares == 20);
     CHECK(levels[1].price == 100400 && levels[1].shares == 200);
-    check_shadow(&book);
 
     CHECK(orderbook_delete(&book, 3001) == 1);
     CHECK(orderbook_best_ask(&book)->price == 100400);
@@ -637,7 +605,6 @@ static void test_orderbook(void)
     CHECK(orderbook_execute(&book, 1001, 75) == 1);
     CHECK(orderbook_best_bid(&book)->price == 99900);
     CHECK(orderbook_best_bid(&book)->shares == 30);
-    check_shadow(&book);
 
     orderbook_free(&book);
 }
@@ -656,72 +623,35 @@ static void test_orderbook_upsert_level_replaces_same_price(void)
     CHECK(bid != NULL && bid->price == 100000 && bid->shares == 150);
     CHECK(orderbook_depth(&book, 'B', levels, 3) == 1);
     CHECK(levels[0].price == 100000 && levels[0].shares == 150);
-    check_shadow(&book);
 
     CHECK(orderbook_upsert_level(&book, 5001, 'B', 40, "AMAT", 100000) == 1);
     bid = orderbook_best_bid(&book);
     CHECK(bid != NULL && bid->price == 100000 && bid->shares == 90);
     CHECK(orderbook_depth(&book, 'B', levels, 3) == 1);
     CHECK(levels[0].price == 100000 && levels[0].shares == 90);
-    check_shadow(&book);
 
     CHECK(orderbook_upsert_level(&book, 5001, 'B', 160, "AMAT", 100000) == 1);
     bid = orderbook_best_bid(&book);
     CHECK(bid != NULL && bid->price == 100000 && bid->shares == 210);
     CHECK(orderbook_depth(&book, 'B', levels, 3) == 1);
     CHECK(levels[0].price == 100000 && levels[0].shares == 210);
-    check_shadow(&book);
 
     CHECK(orderbook_upsert_level(&book, 5001, 'B', 160, "AMAT", 100100) == 1);
     CHECK(orderbook_depth(&book, 'B', levels, 3) == 2);
     CHECK(levels[0].price == 100100 && levels[0].shares == 160);
     CHECK(levels[1].price == 100000 && levels[1].shares == 50);
-    check_shadow(&book);
 
     CHECK(orderbook_upsert_level(&book, 5001, 'S', 25, "AMAT", 100200) == 1);
     bid = orderbook_best_bid(&book);
     ask = orderbook_best_ask(&book);
     CHECK(bid != NULL && bid->price == 100000 && bid->shares == 50);
     CHECK(ask != NULL && ask->price == 100200 && ask->shares == 25);
-    check_shadow(&book);
 
     CHECK(orderbook_upsert_level(&book, 5001, 'S', 0, "AMAT", 100200) == 1);
     CHECK(orderbook_best_ask(&book) == NULL);
-    check_shadow(&book);
 
     orderbook_free(&book);
 }
-
-static void test_orderbook_shadow_sequence(void)
-{
-    OrderBook book;
-
-    CHECK(orderbook_init(&book) == 0);
-    for (uint64_t i = 1; i <= 200; i++) {
-        char side = (i % 3) == 0 ? 'S' : 'B';
-        uint32_t price = side == 'B' ? 100000u + (uint32_t)(i % 17) * 10u
-                                     : 100500u + (uint32_t)(i % 19) * 10u;
-        CHECK(orderbook_add(&book, i, side, (uint32_t)(10 + i % 11), "AMAT", price) == 1);
-        check_shadow(&book);
-    }
-    for (uint64_t i = 1; i <= 200; i += 4) {
-        CHECK(orderbook_cancel(&book, i, 3) == 1);
-        check_shadow(&book);
-    }
-    for (uint64_t i = 2; i <= 200; i += 5) {
-        CHECK(orderbook_delete(&book, i) == 1);
-        check_shadow(&book);
-    }
-    for (uint64_t i = 3; i <= 200; i += 7) {
-        uint64_t new_id = 1000 + i;
-        uint32_t price = 100100u + (uint32_t)(i % 23) * 10u;
-        int rc = orderbook_replace(&book, i, new_id, 25, price);
-        CHECK(rc == 0 || rc == 1);
-        check_shadow(&book);
-    }
-    orderbook_free(&book);
-}
-
 
 static void test_matching_engine(void)
 {
@@ -764,7 +694,6 @@ static void test_matching_engine(void)
     CHECK(report.trades == 0);
     CHECK(orderbook_depth(&book, 'S', levels, 3) == 1);
     CHECK(levels[0].price == 100200 && levels[0].shares == 10);
-    check_shadow(&book);
 
     orderbook_free(&book);
 }
@@ -828,7 +757,6 @@ static void test_orderbook_state_machine(void)
     CHECK(report.executed_shares == 30);
     CHECK(report.resting_shares == 0);
     CHECK(report.trades == 1);
-    CHECK(orderbook_shadow_best_matches(&book));
 
     CHECK(orderbook_state_hash(&book, &hash_before) == 0);
     CHECK(orderbook_state_hash(&replay, &hash_replay) == 0);
@@ -1105,10 +1033,8 @@ int main(void)
     test_event_log_replay();
     test_event_log_replay_failures();
     test_utils();
-    test_heap();
     test_orderbook();
     test_orderbook_upsert_level_replaces_same_price();
-    test_orderbook_shadow_sequence();
     test_orderbook_randomized_depth();
     test_matching_engine();
     test_matching_same_price_fifo();

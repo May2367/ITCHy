@@ -6,12 +6,12 @@
 
 ## Book
 
-The book now keeps two views of the same state:
+The book keeps an order lookup plus aggregated price levels:
 
 - `uthash` maps order ID to `Order` for add, cancel, delete, execute, and replace.
-- A price-level hash maps price to aggregate shares for each side.
+- A price-level hash maps price to aggregate shares and a FIFO queue of resting orders for each side.
 - A max-heap of bid levels and a min-heap of ask levels provide fast best-price lookup.
-- The old per-order bid/ask heaps remain as a shadow path during the price-level transition. Tests compare shadow best prices against price-level best prices after deterministic update sequences.
+- Matching uses the best price level and consumes from that level's FIFO head, so the order book no longer maintains separate per-order bid/ask heaps.
 
 The price-level hash plus heap keeps the hot update path close to the original code: order lookup is still O(1) average, best bid/ask is O(1), and adding or removing a price level is O(log n). Updating shares at an existing price is O(1). The tradeoff is depth: `orderbook_depth()` copies and sorts the current levels before returning the top N, so it is simple and deterministic but not optimized for very frequent full-depth queries.
 
@@ -21,7 +21,7 @@ A sorted array would make depth reads cheap but would shift more cost into inser
 
 `orderbook_apply()` wraps the decoded book operations in one small message API. The parser still decodes feed records the same way, but tests and benchmarks can replay decoded operations through one deterministic entry point.
 
-`orderbook_snapshot()` serializes active orders into a byte buffer sorted by order ID, including each order arrival sequence and the next arrival counter. The heaps and price-level hashes are treated as derived state and rebuilt by `orderbook_restore()`. `orderbook_state_hash()` hashes that serialized image, so replay comparisons include the price-time-priority state, not just price and quantity.
+`orderbook_snapshot()` serializes active orders into a byte buffer sorted by order ID, including each order arrival sequence and the next arrival counter. Price-level hashes, price-level heaps, and FIFO links are treated as derived state and rebuilt by `orderbook_restore()`. `orderbook_state_hash()` hashes that serialized image, so replay comparisons include the price-time-priority state, not just price and quantity.
 
 The local replay path writes decoded applied messages as CSV with `seq,timestamp_ns,type,order_id,new_order_id,side,shares,price,stock,state_hash`. `--replay` reads that file, checks sequence continuity, reapplies each message through `orderbook_apply()`, and compares the post-apply state hash after every event. This log is intentionally the state-machine input stream, not the publisher top-of-book stream; top-of-book rows are useful for consumers but do not contain enough information to rebuild the full book.
 

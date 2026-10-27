@@ -1,7 +1,6 @@
 #ifndef ITCHY_ORDERBOOK_H
 #define ITCHY_ORDERBOOK_H
 
-#include "heap.h"
 #include "types.h"
 
 #include <stddef.h>
@@ -52,8 +51,6 @@ typedef struct {
 } OrderBookSnapshot;
 
 typedef struct {
-    Heap bids;
-    Heap asks;
     Order *orders;
     size_t order_count;
     PriceLevel *bid_levels;
@@ -82,7 +79,6 @@ int orderbook_apply(OrderBook *book, const OrderBookMessage *msg, MatchReport *r
 Order *orderbook_best_bid(const OrderBook *book);
 Order *orderbook_best_ask(const OrderBook *book);
 size_t orderbook_depth(const OrderBook *book, char side, BookLevel *levels, size_t max_levels);
-int orderbook_shadow_best_matches(const OrderBook *book);
 int orderbook_snapshot(const OrderBook *book, OrderBookSnapshot *snapshot);
 void orderbook_snapshot_free(OrderBookSnapshot *snapshot);
 int orderbook_restore(OrderBook *book, const OrderBookSnapshot *snapshot);

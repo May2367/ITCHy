@@ -26,6 +26,8 @@ typedef struct {
     RunMode run_mode;
 } Config;
 
+struct PriceLevel;
+
 typedef struct Order {
     uint64_t order_id;
     uint64_t arrival_sequence;
@@ -33,7 +35,9 @@ typedef struct Order {
     uint32_t price;
     char side;
     char stock[ITCHY_TICKER_LEN + 1];
-    size_t heap_index;
+    struct PriceLevel *level;
+    struct Order *level_prev;
+    struct Order *level_next;
     UT_hash_handle hh;
 } Order;
 

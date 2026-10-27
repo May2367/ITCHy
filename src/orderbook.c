@@ -13,18 +13,10 @@ struct PriceLevel {
     uint32_t price;
     uint64_t shares;
     size_t heap_index;
+    Order *head;
+    Order *tail;
     UT_hash_handle hh;
 };
-
-static Heap *heap_for(OrderBook *book, char side)
-{
-    return side == 'B' ? &book->bids : &book->asks;
-}
-
-static const Heap *const_heap_for(const OrderBook *book, char side)
-{
-    return side == 'B' ? &book->bids : &book->asks;
-}
 
 static PriceLevel **levels_for(OrderBook *book, char side)
 {
@@ -281,13 +273,55 @@ static void unlink_order(OrderBook *book, Order *order)
     book->order_count--;
 }
 
-static int add_order(OrderBook *book, Order *order)
+static int link_order_to_level(OrderBook *book, Order *order)
 {
-    if (heap_insert(heap_for(book, order->side), order) != 0) {
+    PriceLevel *level;
+
+    if (add_level_shares(book, order->side, order->price, order->shares) != 0) {
         return -1;
     }
-    if (add_level_shares(book, order->side, order->price, order->shares) != 0) {
-        heap_remove_at(heap_for(book, order->side), order->heap_index);
+    level = find_level(*levels_for(book, order->side), order->price);
+    if (level == NULL) {
+        return -1;
+    }
+
+    order->level = level;
+    order->level_prev = level->tail;
+    order->level_next = NULL;
+    if (level->tail != NULL) {
+        level->tail->level_next = order;
+    } else {
+        level->head = order;
+    }
+    level->tail = order;
+    return 0;
+}
+
+static void unlink_order_from_level(Order *order)
+{
+    PriceLevel *level = order->level;
+
+    if (level == NULL) {
+        return;
+    }
+    if (order->level_prev != NULL) {
+        order->level_prev->level_next = order->level_next;
+    } else {
+        level->head = order->level_next;
+    }
+    if (order->level_next != NULL) {
+        order->level_next->level_prev = order->level_prev;
+    } else {
+        level->tail = order->level_prev;
+    }
+    order->level = NULL;
+    order->level_prev = NULL;
+    order->level_next = NULL;
+}
+
+static int add_order(OrderBook *book, Order *order)
+{
+    if (link_order_to_level(book, order) != 0) {
         return -1;
     }
 
@@ -299,8 +333,6 @@ static int add_order(OrderBook *book, Order *order)
 int orderbook_init(OrderBook *book)
 {
     memset(book, 0, sizeof(*book));
-    heap_init(&book->bids, HEAP_MAX);
-    heap_init(&book->asks, HEAP_MIN);
     level_heap_init(&book->level_bids, 'B');
     level_heap_init(&book->level_asks, 'S');
     book->next_arrival_sequence = 1;
@@ -327,8 +359,6 @@ void orderbook_free(OrderBook *book)
         free(level);
     }
 
-    heap_free(&book->bids);
-    heap_free(&book->asks);
     level_heap_free(&book->level_bids);
     level_heap_free(&book->level_asks);
     memset(book, 0, sizeof(*book));
@@ -391,8 +421,8 @@ int orderbook_delete(OrderBook *book, uint64_t order_id)
         return 0;
     }
 
+    unlink_order_from_level(order);
     remove_level_shares(book, order->side, order->price, order->shares);
-    heap_remove_at(heap_for(book, order->side), order->heap_index);
     unlink_order(book, order);
     free(order);
     return 1;
@@ -458,26 +488,17 @@ int orderbook_upsert_level(OrderBook *book, uint64_t level_id, char side, uint32
         return 1;
     }
 
+    unlink_order_from_level(order);
     remove_level_shares(book, order->side, order->price, order->shares);
-    if (order->side != side) {
-        heap_remove_at(heap_for(book, order->side), order->heap_index);
-        order->side = side;
-        if (heap_insert(heap_for(book, side), order) != 0) {
-            unlink_order(book, order);
-            free(order);
-            return -1;
-        }
-    }
-
+    order->side = side;
     order->shares = shares;
     order->price = price;
     strncpy(order->stock, stock, ITCHY_TICKER_LEN);
     order->stock[ITCHY_TICKER_LEN] = '\0';
 
-    if (add_level_shares(book, side, price, shares) != 0) {
+    if (link_order_to_level(book, order) != 0) {
         return -1;
     }
-    heap_fix_at(heap_for(book, order->side), order->heap_index);
     return 1;
 }
 
@@ -514,8 +535,8 @@ int orderbook_match_limit(OrderBook *book, uint64_t order_id, char side, uint32_
             break;
         }
 
-        resting = heap_peek(heap_for(book, opposite_side));
-        if (resting == NULL || resting->price != level->price) {
+        resting = level->head;
+        if (resting == NULL) {
             break;
         }
 
@@ -811,26 +832,4 @@ int orderbook_state_hash(const OrderBook *book, uint64_t *hash)
     *hash = fnv1a64(snapshot.data, snapshot.size);
     orderbook_snapshot_free(&snapshot);
     return 0;
-}
-
-int orderbook_shadow_best_matches(const OrderBook *book)
-{
-    Order *shadow_bid = heap_peek(const_heap_for(book, 'B'));
-    Order *shadow_ask = heap_peek(const_heap_for(book, 'S'));
-    Order *bid = orderbook_best_bid(book);
-    Order *ask = orderbook_best_ask(book);
-
-    if ((shadow_bid == NULL) != (bid == NULL)) {
-        return 0;
-    }
-    if ((shadow_ask == NULL) != (ask == NULL)) {
-        return 0;
-    }
-    if (shadow_bid != NULL && shadow_bid->price != bid->price) {
-        return 0;
-    }
-    if (shadow_ask != NULL && shadow_ask->price != ask->price) {
-        return 0;
-    }
-    return 1;
 }

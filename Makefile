@@ -10,11 +10,11 @@ BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
 SAN_DIR := $(BUILD_DIR)/sanitize
 
-SRCS := src/main.c src/parser.c src/orderbook.c src/heap.c src/utils.c src/spsc_ring.c src/publisher.c src/replay.c src/benchmark.c
+SRCS := src/main.c src/parser.c src/orderbook.c src/utils.c src/spsc_ring.c src/publisher.c src/replay.c src/benchmark.c
 OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(SRCS))
 
 TEST_TARGET := $(BUILD_DIR)/test_itchy
-TEST_SRCS := tests/test_itchy.c src/parser.c src/orderbook.c src/heap.c src/utils.c src/spsc_ring.c src/publisher.c src/replay.c
+TEST_SRCS := tests/test_itchy.c src/parser.c src/orderbook.c src/utils.c src/spsc_ring.c src/publisher.c src/replay.c
 TEST_OBJS := $(patsubst %.c,$(OBJ_DIR)/%.o,$(TEST_SRCS))
 
 SAN_TARGET := $(SAN_DIR)/test_itchy
