@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "types.h"
+
 static inline uint16_t read_uint16_be(const unsigned char *buf)
 {
     return (uint16_t)(((uint16_t)buf[0] << 8) | (uint16_t)buf[1]);
@@ -41,6 +43,7 @@ static inline uint64_t read_uint64_be(const unsigned char *buf)
 
 void copy_itch_string(char *dest, size_t dest_size, const unsigned char *src, size_t src_len);
 int ticker_matches(const char *filter, const char *stock);
+void config_set_ticker(Config *config, const char *ticker);
 void format_price(char *dest, size_t dest_size, uint32_t price);
 
 #endif

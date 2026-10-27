@@ -43,25 +43,10 @@ static uint64_t fnv1a64(const unsigned char *data, size_t len)
     return h;
 }
 
-static int raw_ticker_matches(const char *filter, const unsigned char *raw)
+static int raw_ticker_matches(const Config *config, const unsigned char *raw)
 {
-    size_t i;
-
-    for (i = 0; i < ITCHY_TICKER_LEN && filter[i] != '\0'; i++) {
-        if ((unsigned char)filter[i] != raw[i]) {
-            return 0;
-        }
-    }
-    if (i == ITCHY_TICKER_LEN) {
-        return filter[i] == '\0';
-    }
-    while (i < ITCHY_TICKER_LEN) {
-        if (raw[i] != ' ') {
-            return 0;
-        }
-        i++;
-    }
-    return 1;
+    return config->ticker[0] == '\0' ||
+           memcmp(config->raw_ticker, raw, ITCHY_TICKER_LEN) == 0;
 }
 
 static int set_timestamp(const unsigned char *msg, size_t len, size_t no_tracking_len,
@@ -86,7 +71,7 @@ static int parse_add(const unsigned char *msg, size_t len, const Config *config,
     }
 
     p = msg + layout.payload_offset;
-    if (config->ticker[0] != '\0' && !raw_ticker_matches(config->ticker, p + 13)) {
+    if (!raw_ticker_matches(config, p + 13)) {
         return 0;
     }
     copy_itch_string(stock, sizeof(stock), p + 13, ITCHY_TICKER_LEN);
@@ -201,14 +186,14 @@ static int parse_trade_or_cross(const unsigned char *msg, size_t len, const Conf
             return 0;
         }
         p = msg + layout.payload_offset;
-        return config->ticker[0] == '\0' || raw_ticker_matches(config->ticker, p + 13) ? 1 : 0;
+        return raw_ticker_matches(config, p + 13) ? 1 : 0;
     }
 
     if (!set_timestamp(msg, len, 38, timestamp, &layout)) {
         return 0;
     }
     p = msg + layout.payload_offset;
-    return config->ticker[0] == '\0' || raw_ticker_matches(config->ticker, p + 8) ? 1 : 0;
+    return raw_ticker_matches(config, p + 8) ? 1 : 0;
 }
 
 static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config *config,
@@ -231,7 +216,7 @@ static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config
     price = read_uint32_be(msg + 26);
 
     if ((side != 'B' && side != 'S') ||
-        (config->ticker[0] != '\0' && !raw_ticker_matches(config->ticker, msg + 18))) {
+        (!raw_ticker_matches(config, msg + 18))) {
         return 0;
     }
     copy_itch_string(stock, sizeof(stock), msg + 18, ITCHY_TICKER_LEN);

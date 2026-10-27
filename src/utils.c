@@ -33,3 +33,17 @@ void format_price(char *dest, size_t dest_size, uint32_t price)
 {
     snprintf(dest, dest_size, "%u.%04u", price / 10000u, price % 10000u);
 }
+
+void config_set_ticker(Config *config, const char *ticker)
+{
+    size_t len;
+
+    strncpy(config->ticker, ticker, ITCHY_TICKER_LEN);
+    config->ticker[ITCHY_TICKER_LEN] = '\0';
+    memset(config->raw_ticker, ' ', sizeof(config->raw_ticker));
+    len = strlen(config->ticker);
+    if (len > ITCHY_TICKER_LEN) {
+        len = ITCHY_TICKER_LEN;
+    }
+    memcpy(config->raw_ticker, config->ticker, len);
+}

@@ -203,7 +203,7 @@ static ParseResult run_fixture_limit(const char *path, const char *ticker,
     gzFile in;
 
     if (ticker != NULL) {
-        strcpy(config.ticker, ticker);
+        config_set_ticker(&config, ticker);
     }
     config.update_interval_ns = 0;
     options.max_messages = max_messages;

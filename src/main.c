@@ -143,8 +143,7 @@ static int parse_args(int argc, char **argv, Config *config)
     config->input_path = argv[1];
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "--ticker") == 0 && i + 1 < argc) {
-            strncpy(config->ticker, argv[++i], ITCHY_TICKER_LEN);
-            config->ticker[ITCHY_TICKER_LEN] = '\0';
+            config_set_ticker(config, argv[++i]);
         } else if (strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             config->output_path = argv[++i];
         } else if (strcmp(argv[i], "--interval-ns") == 0 && i + 1 < argc) {

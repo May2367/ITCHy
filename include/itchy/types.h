@@ -19,6 +19,7 @@ typedef struct {
     const char *publish_path;
     const char *event_log_path;
     char ticker[ITCHY_TICKER_LEN + 1];
+    unsigned char raw_ticker[ITCHY_TICKER_LEN];
     uint64_t update_interval_ns;
     uint64_t publish_ring_capacity;
     uint64_t max_messages;
