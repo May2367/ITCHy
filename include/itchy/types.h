@@ -28,6 +28,7 @@ typedef struct {
 
 typedef struct Order {
     uint64_t order_id;
+    uint64_t arrival_sequence;
     uint64_t shares;
     uint32_t price;
     char side;

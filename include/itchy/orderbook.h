@@ -60,6 +60,7 @@ typedef struct {
     PriceLevel *ask_levels;
     LevelHeap level_bids;
     LevelHeap level_asks;
+    uint64_t next_arrival_sequence;
     Order best_bid_view;
     Order best_ask_view;
 } OrderBook;

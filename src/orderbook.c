@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define SNAPSHOT_HEADER_SIZE 16u
-#define SNAPSHOT_RECORD_SIZE 30u
+#define SNAPSHOT_HEADER_SIZE 24u
+#define SNAPSHOT_RECORD_SIZE 38u
 
-static const unsigned char snapshot_magic[8] = {'I', 'T', 'C', 'H', 'Y', 'O', 'B', '1'};
+static const unsigned char snapshot_magic[8] = {'I', 'T', 'C', 'H', 'Y', 'O', 'B', '2'};
 
 struct PriceLevel {
     uint32_t price;
@@ -303,6 +303,7 @@ int orderbook_init(OrderBook *book)
     heap_init(&book->asks, HEAP_MIN);
     level_heap_init(&book->level_bids, 'B');
     level_heap_init(&book->level_asks, 'S');
+    book->next_arrival_sequence = 1;
     return 0;
 }
 
@@ -348,6 +349,7 @@ int orderbook_add(OrderBook *book, uint64_t order_id, char side, uint32_t shares
     }
 
     order->order_id = order_id;
+    order->arrival_sequence = book->next_arrival_sequence++;
     order->side = side;
     order->shares = shares;
     order->price = price;
@@ -431,6 +433,7 @@ int orderbook_upsert_level(OrderBook *book, uint64_t level_id, char side, uint32
             return -1;
         }
         order->order_id = level_id;
+        order->arrival_sequence = book->next_arrival_sequence++;
         order->side = side;
         order->shares = shares;
         order->price = price;
@@ -690,15 +693,17 @@ int orderbook_snapshot(const OrderBook *book, OrderBookSnapshot *snapshot)
 
     memcpy(data, snapshot_magic, sizeof(snapshot_magic));
     write_u64(data + 8, (uint64_t)count);
+    write_u64(data + 16, book->next_arrival_sequence);
     p = data + SNAPSHOT_HEADER_SIZE;
     for (i = 0; i < count; i++) {
         order = orders[i];
         write_u64(p, order->order_id);
-        write_u64(p + 8, order->shares);
-        write_u32(p + 16, order->price);
-        p[20] = (unsigned char)order->side;
-        memset(p + 21, 0, ITCHY_TICKER_LEN + 1);
-        memcpy(p + 21, order->stock, ITCHY_TICKER_LEN);
+        write_u64(p + 8, order->arrival_sequence);
+        write_u64(p + 16, order->shares);
+        write_u32(p + 24, order->price);
+        p[28] = (unsigned char)order->side;
+        memset(p + 29, 0, ITCHY_TICKER_LEN + 1);
+        memcpy(p + 29, order->stock, ITCHY_TICKER_LEN);
         p += SNAPSHOT_RECORD_SIZE;
     }
 
@@ -723,6 +728,7 @@ int orderbook_restore(OrderBook *book, const OrderBookSnapshot *snapshot)
     OrderBook restored;
     const unsigned char *p;
     uint64_t encoded_count;
+    uint64_t next_arrival_sequence;
     size_t count;
 
     if (snapshot == NULL || snapshot->data == NULL || snapshot->size < SNAPSHOT_HEADER_SIZE ||
@@ -735,6 +741,10 @@ int orderbook_restore(OrderBook *book, const OrderBookSnapshot *snapshot)
         return -1;
     }
     count = (size_t)encoded_count;
+    next_arrival_sequence = read_u64(snapshot->data + 16);
+    if (next_arrival_sequence == 0) {
+        return -1;
+    }
     if (snapshot->size != SNAPSHOT_HEADER_SIZE + count * SNAPSHOT_RECORD_SIZE) {
         return -1;
     }
@@ -742,25 +752,44 @@ int orderbook_restore(OrderBook *book, const OrderBookSnapshot *snapshot)
     if (orderbook_init(&restored) != 0) {
         return -1;
     }
+    restored.next_arrival_sequence = next_arrival_sequence;
 
     p = snapshot->data + SNAPSHOT_HEADER_SIZE;
     for (size_t i = 0; i < count; i++) {
         uint64_t order_id = read_u64(p);
-        uint64_t shares = read_u64(p + 8);
-        uint32_t price = read_u32(p + 16);
-        char side = (char)p[20];
+        uint64_t arrival_sequence = read_u64(p + 8);
+        uint64_t shares = read_u64(p + 16);
+        uint32_t price = read_u32(p + 24);
+        char side = (char)p[28];
         char stock[ITCHY_TICKER_LEN + 1];
-        int rc;
+        Order *order;
 
-        if (shares == 0 || shares > UINT32_MAX || (side != 'B' && side != 'S')) {
+        if (arrival_sequence == 0 || shares == 0 || shares > UINT32_MAX ||
+            (side != 'B' && side != 'S')) {
             orderbook_free(&restored);
             return -1;
         }
-        memcpy(stock, p + 21, ITCHY_TICKER_LEN);
+        memcpy(stock, p + 29, ITCHY_TICKER_LEN);
         stock[ITCHY_TICKER_LEN] = '\0';
 
-        rc = orderbook_add(&restored, order_id, side, (uint32_t)shares, stock, price);
-        if (rc != 1) {
+        order = calloc(1, sizeof(*order));
+        if (order == NULL) {
+            orderbook_free(&restored);
+            return -1;
+        }
+        order->order_id = order_id;
+        order->arrival_sequence = arrival_sequence;
+        order->side = side;
+        order->shares = shares;
+        order->price = price;
+        strncpy(order->stock, stock, ITCHY_TICKER_LEN);
+        order->stock[ITCHY_TICKER_LEN] = '\0';
+        if (add_order(&restored, order) != 1) {
+            free(order);
+            orderbook_free(&restored);
+            return -1;
+        }
+        if (arrival_sequence >= restored.next_arrival_sequence) {
             orderbook_free(&restored);
             return -1;
         }

@@ -769,6 +769,26 @@ static void test_matching_engine(void)
     orderbook_free(&book);
 }
 
+static void test_matching_same_price_fifo(void)
+{
+    OrderBook book;
+    MatchReport report;
+
+    CHECK(orderbook_init(&book) == 0);
+    CHECK(orderbook_add(&book, 100, 'S', 30, "AMAT", 100000) == 1);
+    CHECK(orderbook_add(&book, 1, 'S', 30, "AMAT", 100000) == 1);
+
+    CHECK(orderbook_match_limit(&book, 200, 'B', 40, "AMAT", 100000, &report) == 1);
+    CHECK(report.executed_shares == 40);
+    CHECK(report.resting_shares == 0);
+    CHECK(report.trades == 2);
+    CHECK(orderbook_delete(&book, 100) == 0);
+    CHECK(orderbook_cancel(&book, 1, 20) == 1);
+    CHECK(orderbook_delete(&book, 1) == 0);
+
+    orderbook_free(&book);
+}
+
 static void test_orderbook_state_machine(void)
 {
     OrderBook book;
@@ -842,7 +862,7 @@ static void test_orderbook_state_machine(void)
     CHECK(orderbook_add(&same_b, 10, 'B', 10, "AMAT", 100000) == 1);
     CHECK(orderbook_state_hash(&same_a, &hash_same_a) == 0);
     CHECK(orderbook_state_hash(&same_b, &hash_same_b) == 0);
-    CHECK(hash_same_a == hash_same_b);
+    CHECK(hash_same_a != hash_same_b);
 
     orderbook_snapshot_free(&snapshot);
     orderbook_free(&same_b);
@@ -1091,6 +1111,7 @@ int main(void)
     test_orderbook_shadow_sequence();
     test_orderbook_randomized_depth();
     test_matching_engine();
+    test_matching_same_price_fifo();
     test_orderbook_state_machine();
     test_parser_fixture();
     test_parser_max_messages();

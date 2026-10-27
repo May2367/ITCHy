@@ -7,6 +7,9 @@ static int heap_better(const Heap *heap, const Order *a, const Order *b)
     if (a->price != b->price) {
         return heap->kind == HEAP_MAX ? a->price > b->price : a->price < b->price;
     }
+    if (a->arrival_sequence != b->arrival_sequence) {
+        return a->arrival_sequence < b->arrival_sequence;
+    }
     return a->order_id < b->order_id;
 }
 

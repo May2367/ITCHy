@@ -21,7 +21,7 @@ A sorted array would make depth reads cheap but would shift more cost into inser
 
 `orderbook_apply()` wraps the decoded book operations in one small message API. The parser still decodes feed records the same way, but tests and benchmarks can replay decoded operations through one deterministic entry point.
 
-`orderbook_snapshot()` serializes the active orders into a byte buffer sorted by order ID. The heaps and price-level hashes are treated as derived state and rebuilt by `orderbook_restore()`. `orderbook_state_hash()` hashes that serialized image, so two runs with the same final active orders compare equal even if hash-table iteration or heap insertion order differed internally.
+`orderbook_snapshot()` serializes active orders into a byte buffer sorted by order ID, including each order arrival sequence and the next arrival counter. The heaps and price-level hashes are treated as derived state and rebuilt by `orderbook_restore()`. `orderbook_state_hash()` hashes that serialized image, so replay comparisons include the price-time-priority state, not just price and quantity.
 
 The local replay path writes decoded applied messages as CSV with `seq,timestamp_ns,type,order_id,new_order_id,side,shares,price,stock,state_hash`. `--replay` reads that file, checks sequence continuity, reapplies each message through `orderbook_apply()`, and compares the post-apply state hash after every event. This log is intentionally the state-machine input stream, not the publisher top-of-book stream; top-of-book rows are useful for consumers but do not contain enough information to rebuild the full book.
 
@@ -29,7 +29,7 @@ The local replay path writes decoded applied messages as CSV with `seq,timestamp
 
 `orderbook_match_limit()` is an opt-in API for crossing synthetic limit orders. Normal parser behavior is unchanged: parsed ITCH-style add/cancel/delete/execute/replace messages still apply directly to the book.
 
-Matching uses price priority first. Within a price level, the current implementation uses the lowest resting order ID as the time-priority proxy. That matches the synthetic tests and keeps the implementation small, but it is not a full exchange timestamp or sequence-number model. Any remaining incoming quantity rests through the same order and price-level structures as normal adds.
+Matching uses price priority first. Within a price level, resting orders are filled by arrival sequence, so FIFO no longer depends on order ID. Any remaining incoming quantity rests through the same order and price-level structures as normal adds.
 
 ## Threaded Apply Benchmark
 
