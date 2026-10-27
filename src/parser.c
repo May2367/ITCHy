@@ -49,6 +49,15 @@ static int raw_ticker_matches(const Config *config, const unsigned char *raw)
            memcmp(config->raw_ticker, raw, ITCHY_TICKER_LEN) == 0;
 }
 
+static void set_decoded_stock(char *dest, const Config *config, const unsigned char *raw)
+{
+    if (config->ticker[0] != '\0') {
+        memcpy(dest, config->ticker, ITCHY_TICKER_LEN + 1);
+        return;
+    }
+    copy_itch_string(dest, ITCHY_TICKER_LEN + 1, raw, ITCHY_TICKER_LEN);
+}
+
 static int set_timestamp(const unsigned char *msg, size_t len, size_t no_tracking_len,
                          uint64_t *timestamp, Layout *layout)
 {
@@ -64,7 +73,6 @@ static int parse_add(const unsigned char *msg, size_t len, const Config *config,
 {
     Layout layout;
     const unsigned char *p;
-    char stock[ITCHY_TICKER_LEN + 1];
 
     if (!set_timestamp(msg, len, msg[0] == 'A' ? 34 : 38, timestamp, &layout)) {
         return 0;
@@ -74,7 +82,6 @@ static int parse_add(const unsigned char *msg, size_t len, const Config *config,
     if (!raw_ticker_matches(config, p + 13)) {
         return 0;
     }
-    copy_itch_string(stock, sizeof(stock), p + 13, ITCHY_TICKER_LEN);
 
     memset(decoded, 0, sizeof(*decoded));
     decoded->type = ORDERBOOK_MSG_ADD;
@@ -82,7 +89,7 @@ static int parse_add(const unsigned char *msg, size_t len, const Config *config,
     decoded->side = (char)p[8];
     decoded->shares = read_uint32_be(p + 9);
     decoded->price = read_uint32_be(p + 21);
-    memcpy(decoded->stock, stock, ITCHY_TICKER_LEN + 1);
+    set_decoded_stock(decoded->stock, config, p + 13);
     return 1;
 }
 
@@ -199,7 +206,6 @@ static int parse_trade_or_cross(const unsigned char *msg, size_t len, const Conf
 static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config *config,
                               uint64_t *timestamp, OrderBookMessage *decoded)
 {
-    char stock[ITCHY_TICKER_LEN + 1];
     unsigned char key[1 + ITCHY_TICKER_LEN + 4 + 4];
     char side;
     uint32_t shares;
@@ -219,8 +225,6 @@ static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config
         (!raw_ticker_matches(config, msg + 18))) {
         return 0;
     }
-    copy_itch_string(stock, sizeof(stock), msg + 18, ITCHY_TICKER_LEN);
-
     key[0] = (unsigned char)side;
     memcpy(key + 1, msg + 18, ITCHY_TICKER_LEN);
     memcpy(key + 1 + ITCHY_TICKER_LEN, msg + 26, 4);
@@ -233,7 +237,7 @@ static int parse_tvagg_update(const unsigned char *msg, size_t len, const Config
     decoded->side = side;
     decoded->shares = shares;
     decoded->price = price;
-    memcpy(decoded->stock, stock, ITCHY_TICKER_LEN + 1);
+    set_decoded_stock(decoded->stock, config, msg + 18);
     return 1;
 }
 

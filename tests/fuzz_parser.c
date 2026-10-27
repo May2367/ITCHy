@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "parser.h"
+#include "utils.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -37,7 +38,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     }
     gzclose(out);
 
-    strcpy(config.ticker, "AAPL");
+    config_set_ticker(&config, "AAPL");
     options.max_messages = 4096;
 
     in = gzopen(path, "rb");
