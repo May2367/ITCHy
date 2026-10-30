@@ -40,13 +40,15 @@ The ring stores fixed-size records and uses atomic head/tail indexes. It also ex
 
 ## Event Publisher
 
-Top-of-book publishing is optional and off the parser callback path. The hot path copies the current best bid/ask into a fixed-size event, assigns a monotonic sequence number, and tries to push it into a C11-atomic SPSC ring. A publisher thread drains the ring through a small sink interface. The current sink implementation writes CSV to a file.
+Top-of-book publishing is optional and off the parser callback path. The hot path copies the current best bid/ask into a fixed-size event, assigns a monotonic sequence number, and pushes it into a C11-atomic SPSC ring. A publisher thread drains the ring through a small internal sink interface. The current sink implementation writes CSV to a file.
 
-The queue policy is bounded and nonblocking: if the ring is full, the event is dropped, a counter is incremented, and the consumed sequence number leaves a detectable gap. The default CLI and benchmark ring capacity is 262144 events after a synthetic sweep found that smaller rings dropped events on this workload. That favors parser latency over guaranteed delivery. Normal parser output still works without the publisher, and benchmark mode reports a `publisher_file_sink` section plus enqueue, write, and drop counts. A Kafka sink would plug in at this sink boundary, but there is no librdkafka dependency or Kafka output path yet.
+The publisher reports enqueue, write, and drop counters. Real-feed QQQ runs recorded zero drops at ring sizes 4096, 65536, and 262144. Synthetic stress runs are used to size the default ring and exercise saturation behavior.
 
-## Sample Aggregate U Records
+## Feed Layouts
 
-The sample-specific 34-byte `U` records are represented as synthetic order IDs. They still flow through the same order and price-level update path, so aggregate top-of-book and depth include those updates.
+The main parser path targets raw order-level ITCH messages. Add, execute, cancel, delete, and replace messages are decoded into a small internal `OrderBookMessage` format and applied through the order-ID lookup plus price-level book.
+
+Some aggregate sample formats use non-standard records for price-level updates. Those records are represented as synthetic order IDs and flow through the same price-level update path, so top-of-book and depth include them.
 
 ## Limitations
 

@@ -10,14 +10,9 @@ gmon.out
 /tests/tmp_event_log.csv
 /tests/tmp_event_log_bad.csv
 
-# data files
-/data/*
-!/data/.gitkeep
-!/data/README.md
+# local market data
+/data/
 
-# FABRIC run outputs
-/scripts/fabric/vm_link_test/.build/
-/scripts/fabric/vm_link_test/results/
 
 # editor/notebook noise
 .ipynb_checkpoints/
