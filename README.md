@@ -79,7 +79,7 @@ Supported order-book messages include add, execute, execute-with-price, cancel, 
 
 The main parser path targets raw order-level ITCH data and has been checked against raw Nasdaq TotalView-ITCH sample data. A compatibility path also handles non-standard aggregate records from `tvagg.gz`-style data by applying them as price-level updates.
 
-The [Nasdaq TotalView-ITCH 5.0 specification](https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification_5.0.pdf) is published by NasdaqTrader as a PDF.
+The [Nasdaq TotalView-ITCH 5.0 specification](https://www.nasdaqtrader.com/content/technicalsupport/specifications/dataproducts/NQTVITCHSpecification.pdf) is published by NasdaqTrader as a PDF.
 
 ## Current Book Model
 
